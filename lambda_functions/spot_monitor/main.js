@@ -168,13 +168,34 @@ exports.main = async function(event, context, callback) {
 			if (/cancelled/.test(fleet.SpotFleetRequestState)) {
 				const fleetState = (fleet.SpotFleetRequestState == "cancelled") ? "COMPLETED" : "STOPPING";
 
-				promises.push(editCampaignViaRequestId(fleet.SpotFleetRequestId, {
+				// Check if this was a capacity termination (should be resumable)
+				const wasCapacityTerminated = checkForCapacityTermination(fleet);
+
+				const updateData = {
 					active: false,
 					spotRequestHistory: fleet.history,
 					spotRequestStatus: fleet.instances,
 					status: fleetState
-				}).then((data) => {
-					console.log(`[+] Marked campaign of ${fleet.SpotFleetRequestId} as ${fleetState}`);
+				};
+
+				if (wasCapacityTerminated) {
+					console.log(`[CAPACITY-LOSS] Fleet ${fleet.SpotFleetRequestId} was terminated due to capacity issues`);
+					console.log(`[CAPACITY-LOSS] Reason: ${wasCapacityTerminated.reason}`);
+					console.log(`[CAPACITY-LOSS] Marking campaign as resumable`);
+
+					updateData.resumable = true;
+					updateData.interrupted = "Capacity Loss";
+					updateData.interruptionTime = Math.floor(Date.now() / 1000);
+					updateData.interruptionReason = wasCapacityTerminated.reason;
+					updateData.interruptionDetails = wasCapacityTerminated.details;
+				}
+
+				promises.push(editCampaignViaRequestId(fleet.SpotFleetRequestId, updateData).then((data) => {
+					if (wasCapacityTerminated) {
+						console.log(`[CAPACITY-LOSS] Campaign ${fleet.SpotFleetRequestId} marked as resumable - restore files should be in S3`);
+					} else {
+						console.log(`[+] Marked campaign of ${fleet.SpotFleetRequestId} as ${fleetState}`);
+					}
 				}, (e) => {
 					console.log(`[!] Failed attempting to update ${promiseDetails.fleets[fleetId].SpotFleetRequestId}`);
 				}));
@@ -489,6 +510,116 @@ function editCampaignViaRequestId(spotFleetRequestId, values) {
 	});
 }
 
+function checkForCapacityTermination(fleet) {
+	// Check fleet history for capacity-related termination reasons
+	const capacityIndicators = [
+		'instance-terminated-no-capacity',
+		'instance-terminated-capacity-oversubscribed',
+		'instance-terminated-launch-group-constraint',
+		'no-capacity',
+		'capacity-oversubscribed',
+		'InsufficientInstanceCapacity',
+		'Server.InsufficientInstanceCapacity'
+	];
+
+	let capacityLoss = null;
+
+	// Check spot request status messages
+	Object.keys(fleet.instances).forEach((instanceId) => {
+		const instance = fleet.instances[instanceId];
+
+		if (instance.Status && instance.Status.Message) {
+			const message = instance.Status.Message;
+
+			capacityIndicators.forEach((indicator) => {
+				if (message.includes(indicator)) {
+					capacityLoss = {
+						reason: indicator,
+						details: message,
+						instanceId: instanceId,
+						code: instance.Status.Code
+					};
+
+					console.log(`[CAPACITY-LOSS] Instance ${instanceId} terminated: ${message}`);
+				}
+			});
+		}
+	});
+
+	// Check fleet history for capacity events
+	if (!capacityLoss) {
+		fleet.history.forEach((record) => {
+			if (record.EventType === 'instanceChange' && record.EventInformation.EventSubType === 'terminated') {
+				const desc = record.EventInformation.EventDescription;
+
+				if (desc && typeof desc === 'string') {
+					const descObj = JSON.parse(desc);
+
+					if (descObj.reason) {
+						capacityIndicators.forEach((indicator) => {
+							if (descObj.reason.includes(indicator)) {
+								capacityLoss = {
+									reason: descObj.reason,
+									details: desc,
+									instanceId: record.EventInformation.InstanceId,
+									timestamp: record.Timestamp
+								};
+
+								console.log(`[CAPACITY-LOSS] Instance ${record.EventInformation.InstanceId} terminated at ${record.Timestamp}: ${descObj.reason}`);
+							}
+						});
+					}
+				}
+			}
+
+			// Check for launchSpecUnusable events
+			if (record.EventType === 'information' && record.EventInformation.EventSubType === 'launchSpecUnusable') {
+				const desc = record.EventInformation.EventDescription;
+
+				if (!capacityLoss) {
+					capacityLoss = {
+						reason: 'Launch spec unusable',
+						details: desc,
+						timestamp: record.Timestamp
+					};
+
+					console.log(`[CAPACITY-LOSS] Launch spec unusable: ${desc}`);
+				}
+			}
+
+			// Check for spot request closed due to capacity
+			if (record.EventType === 'spotInstanceRequestChange' && record.EventInformation.EventSubType === 'closed') {
+				const desc = record.EventInformation.EventDescription;
+
+				if (desc && typeof desc === 'string') {
+					try {
+						const descObj = JSON.parse(desc);
+
+						if (descObj.reason) {
+							capacityIndicators.forEach((indicator) => {
+								if (descObj.reason.includes(indicator)) {
+									capacityLoss = {
+										reason: descObj.reason,
+										details: desc,
+										bidId: descObj.bidId,
+										timestamp: record.Timestamp
+									};
+
+									console.log(`[CAPACITY-LOSS] Spot request closed: ${descObj.reason}`);
+								}
+							});
+						}
+					} catch (e) {
+						// Ignore JSON parse errors
+					}
+				}
+			}
+		});
+	}
+
+	return capacityLoss;
+}
+
 function getSpotRequestHistory(ec2, sfr, nextToken = null) {
 	let history = [];
 
@@ -497,7 +628,7 @@ function getSpotRequestHistory(ec2, sfr, nextToken = null) {
 		StartTime: "1970-01-01T00:00:00Z",
 		NextToken: nextToken
 	}).promise().then((data) => {
-		
+
 		history = history.concat(data.HistoryRecords);
 
 		if (data.hasOwnProperty('NextToken')) {

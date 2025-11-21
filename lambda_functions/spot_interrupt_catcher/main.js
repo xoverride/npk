@@ -59,6 +59,16 @@ exports.main = async function (event, context, callback) {
 		// Update that campaign details
 		const ddb = new aws.DynamoDB({ region: settings.region });
 
+		const interruptionTime = Math.floor(Date.now() / 1000);
+
+		console.log(`[RESUME-PREP] Spot interruption detected for campaign ${campaignId}`);
+		console.log(`[RESUME-PREP] User: ${user}`);
+		console.log(`[RESUME-PREP] Instance: ${instanceId}`);
+		console.log(`[RESUME-PREP] Interruption time: ${new Date(interruptionTime * 1000).toISOString()}`);
+		console.log(`[RESUME-PREP] Region: ${event.region}`);
+		console.log(`[RESUME-PREP] Instance action: ${JSON.stringify(event.detail)}`);
+		console.log(`[RESUME-PREP] Marking campaign as resumable`);
+
 		await ddb.updateItem({
 			Key: {
 				userid: { S: user },
@@ -69,9 +79,27 @@ exports.main = async function (event, context, callback) {
 				interrupted: {
 					Action: "PUT",
 					Value: { S: "Spot Interruption" }
+				},
+				resumable: {
+					Action: "PUT",
+					Value: { BOOL: true }
+				},
+				interruptedInstance: {
+					Action: "PUT",
+					Value: { S: instanceId }
+				},
+				interruptionTime: {
+					Action: "PUT",
+					Value: { N: interruptionTime.toString() }
+				},
+				interruptionRegion: {
+					Action: "PUT",
+					Value: { S: event.region }
 				}
 			}
 		}).promise();
+
+		console.log(`[RESUME-PREP] Campaign ${campaignId} marked as resumable - restore files should be in S3`);
 	} catch (e) {
 		console.log(`[!] Failed to mark instance as interrupted. ${e}`);
 		return callback("Failed to mark instance as interrupted");

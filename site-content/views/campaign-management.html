@@ -292,11 +292,17 @@
                             {{ campaign.status }}
                           </small>
                           <div ng-if="!!campaign.interrupted" class="badge bg-warning">
-                            {{ campaign.interrupted == 'Spot Interruption' ? 'Interrupted: Outbid' : 'Interrupted' }}
+                            {{ campaign.interrupted == 'Spot Interruption' ? 'Interrupted: Outbid' :
+                               campaign.interrupted == 'Capacity Loss' ? 'Interrupted: No Capacity' :
+                               'Interrupted' }}
                           </div>
                         </td>
                       <td>
                         <img id="action-{{ campaign._id }}" src="assets/images/loading.gif" style="height: 10px; width: 25px; display: none;">
+                        <a id="resume-{{ campaign._id }}" class="badge badge-success waves-effect waves-light" ng-if="campaign.status != 'AVAILABLE' && campaign.status != 'STARTING' && campaign.status != 'RUNNING'" ng-click="$parent.npkDB.resumeCampaign(campaign._id)" style="margin-right: 5px;" title="Resume from checkpoint (if restore files exist)">
+                          <i class="fa fa-play"></i>
+                          <span>Resume</span>
+                        </a>
                         <a id="cancel-{{ campaign._id }}" class="badge waves-effect waves-light" ng-class="[{'badge-danger': campaign.status == 'COMPLETED'}, {'badge-warning': campaign.status != 'COMPLETED'}]" ng-click="$parent.npkDB.cancelCampaign(campaign._id)">
                           <i class="fa fa-trash-o"></i>
                           <span>

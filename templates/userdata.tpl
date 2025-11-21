@@ -113,13 +113,30 @@ chmod +x /root/monitor_instance_action.sh
 cat /root/monitor_instance_action.sh
 
 # Create the crontab to sync s3
+# NOTE: Potfiles still use INSTANCEID (each physical instance has separate output)
+# But restore files use SESSIONPATTERN (logical slot, transferable between instances)
 echo "* * * * * root /usr/local/bin/aws --region $USERDATAREGION s3 sync s3://$USERDATA/$ManifestPath/potfiles/ /potfiles/ --exclude \"*$${INSTANCEID}*\" --exclude \"*benchmark-results*\"" >> /etc/crontab
 echo "* * * * * root /usr/local/bin/aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --include \"*$${INSTANCEID}*\" --include \"*benchmark-results*\"" >> /etc/crontab
+echo "* * * * * root /usr/local/bin/aws --region $USERDATAREGION s3 sync s3://$USERDATA/$ManifestPath/restore/ /root/ --include \"*$${SESSIONPATTERN}*\"" >> /etc/crontab
+echo "* * * * * root /usr/local/bin/aws --region $USERDATAREGION s3 sync /root/ s3://$USERDATA/$ManifestPath/restore/ --include \"*.restore\" --include \"*.restore.pos\" --exclude \"*\" --exclude \"*\"" >> /etc/crontab
 echo "* * * * * root /root/monitor_instance_action.sh" >> /etc/crontab
 
 aws ec2 describe-spot-fleet-instances --region $REGION --spot-fleet-request-id $SpotFleet | jq '.ActiveInstances[].InstanceId' | sort > fleet_instances
 export INSTANCECOUNT=$(cat fleet_instances | wc -l)
 export INSTANCENUMBER=$(cat fleet_instances | grep -nr $INSTANCEID - | cut -d':' -f1)
+
+# Extract campaign ID from ManifestPath for session naming
+# ManifestPath format: {userid}/campaigns/{campaign_id}
+export CAMPAIGNID=$(echo $ManifestPath | cut -d'/' -f3)
+
+# Session pattern: campaignid-instancenumber (NOT instanceid!)
+# This allows new instances to resume work from terminated instances
+export SESSIONPATTERN="$${CAMPAIGNID}-$${INSTANCENUMBER}"
+
+echo "[SESSION] Campaign ID: $${CAMPAIGNID}"
+echo "[SESSION] Instance ID: $${INSTANCEID} (physical instance)"
+echo "[SESSION] Instance Number: $${INSTANCENUMBER} (logical slot)"
+echo "[SESSION] Session Pattern: $${SESSIONPATTERN} (restore files)"
 
 if [[ `lspci | grep AMD | wc -l` -gt 0 ]]; then
 	# Need to compile Hashcat for AL2's old GLIBC
@@ -149,7 +166,46 @@ echo "export ManifestPath=$ManifestPath" >> envvars
 echo "export INSTANCECOUNT=$INSTANCECOUNT" >> envvars
 echo "export INSTANCENUMBER=$INSTANCENUMBER" >> envvars
 echo "export KEYSPACE=$KEYSPACE" >> envvars
+echo "export CAMPAIGNID=$CAMPAIGNID" >> envvars
+echo "export SESSIONPATTERN=$SESSIONPATTERN" >> envvars
 chmod +x envvars
+
+# Download existing restore files if they exist (for resume capability)
+# IMPORTANT: We look for SESSIONPATTERN files, not INSTANCEID files!
+# This allows new instances to resume work from old instances in same slot
+echo "========================================"
+echo "[RESUME-INIT] Checking for restore files"
+echo "[RESUME-INIT] Campaign ID: $${CAMPAIGNID}"
+echo "[RESUME-INIT] Physical Instance ID: $${INSTANCEID}"
+echo "[RESUME-INIT] Logical Instance Number: $${INSTANCENUMBER}"
+echo "[RESUME-INIT] Session Pattern: $${SESSIONPATTERN} (looking for these restore files)"
+echo "[RESUME-INIT] S3 Path: s3://$USERDATA/$ManifestPath/restore/"
+echo "========================================"
+
+# Check if restore files exist before trying to download
+RESTORE_COUNT=$(/usr/local/bin/aws --region $USERDATAREGION s3 ls s3://$USERDATA/$ManifestPath/restore/ | grep "$${SESSIONPATTERN}" | wc -l)
+
+if [ "$RESTORE_COUNT" -gt 0 ]; then
+    echo "[RESUME-INIT] Found $RESTORE_COUNT restore files for session $${SESSIONPATTERN}"
+    echo "[RESUME-INIT] Downloading restore files..."
+    /usr/local/bin/aws --region $USERDATAREGION s3 sync s3://$USERDATA/$ManifestPath/restore/ /root/ --include "*$${SESSIONPATTERN}*"
+
+    # Verify download
+    if [ -f "/root/$${SESSIONPATTERN}.restore" ] && [ -f "/root/$${SESSIONPATTERN}.restore.pos" ]; then
+        echo "[RESUME-INIT] ✓ Restore files downloaded successfully:"
+        ls -lh /root/$${SESSIONPATTERN}.restore*
+        echo "[RESUME-INIT] This instance will resume work from previous instance in slot $${INSTANCENUMBER}"
+        echo "[RESUME-INIT] Hashcat will resume from checkpoint"
+    else
+        echo "[RESUME-INIT] WARNING: Restore files download failed or incomplete"
+        ls -lh /root/*.restore* || echo "[RESUME-INIT] No restore files found locally"
+    fi
+else
+    echo "[RESUME-INIT] No restore files found for session $${SESSIONPATTERN}"
+    echo "[RESUME-INIT] This is a fresh start"
+fi
+
+echo "========================================"
 
 # If we have a mask specified for a non-mask attack type, generate a rule file from the mask:
 if [[ "$(jq -r '.attackType' manifest.json)" != "3" && "$(jq -r '.mask' manifest.json)" != "null" ]]; then
@@ -171,6 +227,8 @@ node compute-node/hashcat_wrapper.js
 echo "[*] Hashcat wrapper finished with status code $?"
 # aws s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/
 aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --include "*$${INSTANCEID}*" --include "*benchmark-results*" --include "all_cracked_hashes.txt"
+# Sync restore files one final time before shutdown
+aws --region $USERDATAREGION s3 sync /root/ s3://$USERDATA/$ManifestPath/restore/ --include "*.restore" --include "*.restore.pos"
 sleep 30
 
 if [[ ! -f /root/nodeath ]]; then

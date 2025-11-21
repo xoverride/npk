@@ -299,6 +299,53 @@ angular
 				});
 			},
 
+			resumeCampaign: function(campaign_id) {
+
+				$('a#resume-' + campaign_id).hide();
+				$('img#action-' + campaign_id).show();
+
+				params = {
+					method: 'PUT',
+					url: 'https://' + APIGATEWAY_URL + '/v1/userproxy/campaign/' + campaign_id,
+					headers: {},
+					body: ""
+				};
+
+				$.ajax(cognitoSvc.signAPIRequest(params)).done((data) => {
+
+					if (typeof data != "object") {
+						try {
+							data = JSON.parse(data);
+						} catch (e) {
+							data = {msg: "Error parsing response JSON.", success: false};
+						}
+					}
+
+					location.href = location.href.split('#')[0];
+				}).fail(function(xhr) {
+
+					data = xhr.responseText;
+
+					try {
+						data = JSON.parse(data);
+					} catch (e) {
+						data = {msg: "Error parsing response JSON.", success: false};
+					}
+
+					if (data.success == false) {
+						$scope.modalMessages.error = [data.msg];
+					} else {
+						$scope.modalMessages.success = [data.msg];
+					}
+
+					$scope.$digest();
+
+					$('#messageModal').modal('show');
+					$('img#action-' + campaign_id).hide();
+					$('a#resume-' + campaign_id).show();
+				});
+			},
+
 			getSignedUrl: function(action, params) {
 				return this.s3.getSignedUrl(action, params);
 			}

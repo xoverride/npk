@@ -176,8 +176,113 @@ exports.main = async function(event, context, callback) {
 		return respond(500, {}, "Failed to retrieve campaign details.", false);
 	}
 
-	if (campaign.Items?.[0]?.status?.S != "AVAILABLE") {
-		return respond(404, {}, "Campaign doesn't exist or is not in 'AVAILABLE' status.", false);
+	// Check if this is a resume attempt by looking for restore files in S3
+	// We don't rely on "resumable" flag - if restore files exist, we can resume!
+	const campaignStatus = campaign.Items?.[0]?.status?.S;
+	const isAvailable = campaignStatus == "AVAILABLE";
+	const canAttemptResume = !isAvailable; // Any non-AVAILABLE campaign might have restore files
+
+	if (!isAvailable && !canAttemptResume) {
+		return respond(404, {}, "Campaign doesn't exist or is not in a valid status.", false);
+	}
+
+	// If campaign is not AVAILABLE, check for restore files to see if we can resume
+	let resumeInstanceCount = manifest.instanceCount;
+	let resumeMetadata = {};
+	let isResume = false;
+
+	if (canAttemptResume) {
+		console.log(`[RESUME] Campaign ${campaignId} is not AVAILABLE, checking for restore files...`);
+		console.log(`[RESUME] Current status: ${campaignStatus}`);
+		console.log(`[RESUME] User: ${email}, Entity: ${entity}`);
+
+		try {
+			// List restore files in S3 to determine if we can resume
+			const s3Path = `${entity}/campaigns/${campaignId}/restore/`;
+			console.log(`[RESUME] Checking S3 for restore files at: s3://${variables.userdata_bucket}/${s3Path}`);
+
+			const restoreFiles = await s3.listObjectsV2({
+				Bucket: variables.userdata_bucket,
+				Prefix: s3Path,
+				MaxKeys: 1000
+			}).promise();
+
+			console.log(`[RESUME] Found ${restoreFiles.Contents?.length || 0} restore files in S3`);
+
+			// Count unique instance IDs from restore files
+			const instancesWithRestoreFiles = new Set();
+			const restoreFileDetails = [];
+
+			if (restoreFiles.Contents) {
+				restoreFiles.Contents.forEach(file => {
+					// Extract session pattern from filename like "campaign_id-1.restore"
+					// Session pattern is: campaign_id-instance_number
+					const match = file.Key.match(/\/([^\/]+)-(\d+)\.restore$/);
+					if (match) {
+						const sessionName = `${match[1]}-${match[2]}`;  // e.g., "campaign123-1"
+						const instanceNumber = parseInt(match[2]);
+						instancesWithRestoreFiles.add(sessionName);
+						restoreFileDetails.push({
+							sessionName: sessionName,
+							instanceNumber: instanceNumber,
+							size: file.Size,
+							lastModified: file.LastModified.toISOString()
+						});
+						console.log(`[RESUME] Found restore file for instance slot ${instanceNumber} (${file.Size} bytes, modified ${file.LastModified.toISOString()})`);
+					}
+				});
+			}
+
+			resumeInstanceCount = instancesWithRestoreFiles.size;
+
+			if (resumeInstanceCount === 0) {
+				console.log("[RESUME] No restore files found - this is a fresh start, not a resume");
+				return respond(400, {}, "No restore files found. Cannot resume campaign. Please create a new campaign instead.", false);
+			}
+
+			// We found restore files, so this IS a resume!
+			isResume = true;
+			console.log(`[RESUME] SUCCESS: Found restore files for ${resumeInstanceCount} instances`);
+			console.log(`[RESUME] Original campaign had ${manifest.instanceCount} instances`);
+			console.log(`[RESUME] ${manifest.instanceCount - resumeInstanceCount} instances already completed`);
+			console.log(`[RESUME] Cost optimization: ${((1 - resumeInstanceCount / manifest.instanceCount) * 100).toFixed(1)}% fewer instances needed`);
+
+			// Log interruption details if available
+			if (campaign.Items[0].interrupted?.S) {
+				console.log(`[RESUME] Interruption reason: ${campaign.Items[0].interrupted.S}`);
+				console.log(`[RESUME] Interrupted at: ${new Date(campaign.Items[0].interruptionTime?.N * 1000 || 0).toISOString()}`);
+			} else {
+				console.log(`[RESUME] No interruption metadata (campaign may have been manually stopped or crashed)`);
+			}
+
+			// Store resume metadata for DynamoDB
+			resumeMetadata = {
+				originalInstanceCount: manifest.instanceCount,
+				resumeInstanceCount: resumeInstanceCount,
+				instancesCompleted: manifest.instanceCount - resumeInstanceCount,
+				restoreFileCount: restoreFiles.Contents?.length || 0,
+				restoreInstances: Array.from(instancesWithRestoreFiles),
+				resumeTimestamp: Math.floor(Date.now() / 1000),
+				s3RestorePath: s3Path
+			};
+
+			// Update manifest with adjusted instance count
+			manifest.instanceCount = resumeInstanceCount;
+
+			console.log(`[RESUME] Resume metadata:`, JSON.stringify(resumeMetadata, null, 2));
+
+		} catch (listErr) {
+			console.error("[RESUME] ERROR: Failed to check restore files:", listErr);
+			console.log("[RESUME] FALLBACK: Using original instance count due to error");
+			resumeInstanceCount = manifest.instanceCount;
+
+			resumeMetadata = {
+				error: listErr.message,
+				fallbackUsed: true,
+				originalInstanceCount: manifest.instanceCount,
+				resumeInstanceCount: resumeInstanceCount
+			};
+		}
 	}
 
 	// Test whether the provided presigned URL is expired.
@@ -417,9 +522,22 @@ exports.main = async function(event, context, callback) {
 			status: "STARTING",
 			spotFleetRequestId: spotFleetRequest.SpotFleetRequestId,
 			startTime: Math.floor(new Date().getTime() / 1000),
-			eventType: "CampaignStarted",
+			eventType: isResume ? "CampaignResumed" : "CampaignStarted",
 			lastuntil: 0,
 		});
+
+		// Clear resume flags and add resume metadata when successfully resuming
+		if (isResume) {
+			updateParams.resumable = { BOOL: false };
+			updateParams.interrupted = { NULL: true };
+			updateParams.resumeMetadata = aws.DynamoDB.Converter.marshall(resumeMetadata);
+			updateParams.resumeCount = { N: (campaign.Items[0].resumeCount?.N ? parseInt(campaign.Items[0].resumeCount.N) + 1 : 1).toString() };
+
+			console.log(`[RESUME] SUCCESS: Campaign ${campaignId} resumed successfully`);
+			console.log(`[RESUME] Spot Fleet ID: ${spotFleetRequest.SpotFleetRequestId}`);
+			console.log(`[RESUME] Launching ${resumeInstanceCount} instances`);
+			console.log(`[RESUME] Resume count: ${updateParams.resumeCount.N}`);
+		}
 
 		const updateCampaign = await ddb.updateItem({
 			Key: {
@@ -435,7 +553,7 @@ exports.main = async function(event, context, callback) {
 
 				return attrs;
 			}, {})
-			
+
 		}).promise();
 	} catch (e) {
 		console.log("Spot fleet submitted, but failed to mark Campaign as 'STARTING'. This is a catastrophic error.", e);
