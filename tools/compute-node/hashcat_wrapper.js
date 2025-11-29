@@ -130,8 +130,9 @@ function checkForRestore(params) {
 	return new Promise((success, failure) => {
 		// Use session_name (campaign_id-instance_number) not instance_id
 		// This allows new instances to resume work from old instances in same slot
-		const restoreFile = `/root/${session_name}.restore`;
-		const restorePosFile = `/root/${session_name}.restore.pos`;
+		// Note: Modern hashcat creates restore files in its installation directory
+		const restoreFile = `/root/hashcat/${session_name}.restore`;
+		const restorePosFile = `/root/hashcat/${session_name}.restore.pos`;
 		const s3RestorePath = `${manifestpath}/restore/${session_name}.restore`;
 		const s3RestorePosPath = `${manifestpath}/restore/${session_name}.restore.pos`;
 
@@ -144,33 +145,44 @@ function checkForRestore(params) {
 		console.log("[RESUME-CHECK] S3 Restore Path:", s3RestorePath);
 		console.log("[RESUME-CHECK] ========================================");
 
-		// Check if restore files exist in S3
+		// Check if restore files exist in S3 (.pos file is optional)
 		Promise.all([
 			s3.headObject({ Bucket: userdata_bucket, Key: s3RestorePath }).promise().catch(() => null),
 			s3.headObject({ Bucket: userdata_bucket, Key: s3RestorePosPath }).promise().catch(() => null)
 		]).then(([restoreExists, restorePosExists]) => {
-			if (restoreExists && restorePosExists) {
+			if (restoreExists) {
 				console.log("[RESUME-CHECK] ✓ Restore files FOUND in S3!");
 				console.log("[RESUME-CHECK] Restore file size:", restoreExists.ContentLength, "bytes");
-				console.log("[RESUME-CHECK] Restore.pos file size:", restorePosExists.ContentLength, "bytes");
+				if (restorePosExists) {
+					console.log("[RESUME-CHECK] Restore.pos file size:", restorePosExists.ContentLength, "bytes");
+				} else {
+					console.log("[RESUME-CHECK] Restore.pos file not found (optional)");
+				}
 				console.log("[RESUME-CHECK] Last modified:", restoreExists.LastModified);
 				console.log("[RESUME-CHECK] Downloading restore files...");
 
-				// Download both restore files
-				return Promise.all([
+				// Download restore file, and .pos file if it exists
+				const downloads = [
 					s3.getObject({ Bucket: userdata_bucket, Key: s3RestorePath }).promise()
 						.then(data => {
 							fs.writeFileSync(restoreFile, data.Body);
 							console.log("[RESUME-CHECK] ✓ Downloaded", s3RestorePath, "->", restoreFile);
 							return data;
-						}),
-					s3.getObject({ Bucket: userdata_bucket, Key: s3RestorePosPath }).promise()
-						.then(data => {
-							fs.writeFileSync(restorePosFile, data.Body);
-							console.log("[RESUME-CHECK] ✓ Downloaded", s3RestorePosPath, "->", restorePosFile);
-							return data;
 						})
-				]).then(() => {
+				];
+
+				if (restorePosExists) {
+					downloads.push(
+						s3.getObject({ Bucket: userdata_bucket, Key: s3RestorePosPath }).promise()
+							.then(data => {
+								fs.writeFileSync(restorePosFile, data.Body);
+								console.log("[RESUME-CHECK] ✓ Downloaded", s3RestorePosPath, "->", restorePosFile);
+								return data;
+							})
+					);
+				}
+
+				return Promise.all(downloads).then(() => {
 					console.log("[RESUME-CHECK] ========================================");
 					console.log("[RESUME-CHECK] RESUME MODE ENABLED");
 					console.log("[RESUME-CHECK] Hashcat will resume from checkpoint");
@@ -305,43 +317,57 @@ function getKeyspace(params) {
 
 function backupRestoreFiles() {
 	return new Promise((success, failure) => {
-		const restoreFile = `/root/${session_name}.restore`;
-		const restorePosFile = `/root/${session_name}.restore.pos`;
+		// Note: Modern hashcat creates restore files in its installation directory
+		const restoreFile = `/root/hashcat/${session_name}.restore`;
+		const restorePosFile = `/root/hashcat/${session_name}.restore.pos`;
 		const s3RestorePath = `${manifestpath}/restore/${session_name}.restore`;
 		const s3RestorePosPath = `${manifestpath}/restore/${session_name}.restore.pos`;
 
-		// Check if restore files exist locally
-		if (!fs.existsSync(restoreFile) || !fs.existsSync(restorePosFile)) {
+		// Check if restore file exists locally (.pos file is optional)
+		if (!fs.existsSync(restoreFile)) {
 			// Don't log every time - only first time
 			if (!backupRestoreFiles.loggedMissing) {
-				console.log("[CHECKPOINT] No restore files to backup yet (hashcat hasn't created them)");
+				console.log("[CHECKPOINT] No restore file to backup yet (hashcat hasn't created it)");
 				backupRestoreFiles.loggedMissing = true;
 			}
 			return success(false);
 		}
 
-		// Reset the flag once files exist
+		// Reset the flag once file exists
 		backupRestoreFiles.loggedMissing = false;
 
 		const restoreStats = fs.statSync(restoreFile);
-		const restorePosStats = fs.statSync(restorePosFile);
+		const hasRestorePos = fs.existsSync(restorePosFile);
 
 		console.log("[CHECKPOINT] Backing up restore files to S3...");
 		console.log("[CHECKPOINT] Restore file size:", restoreStats.size, "bytes");
-		console.log("[CHECKPOINT] Restore.pos file size:", restorePosStats.size, "bytes");
+		if (hasRestorePos) {
+			const restorePosStats = fs.statSync(restorePosFile);
+			console.log("[CHECKPOINT] Restore.pos file size:", restorePosStats.size, "bytes");
+		} else {
+			console.log("[CHECKPOINT] Restore.pos file not present (optional for this attack type)");
+		}
 
-		Promise.all([
+		// Build upload promises - .pos file is optional
+		const uploads = [
 			s3.putObject({
 				Bucket: userdata_bucket,
 				Key: s3RestorePath,
 				Body: fs.readFileSync(restoreFile)
-			}).promise(),
-			s3.putObject({
-				Bucket: userdata_bucket,
-				Key: s3RestorePosPath,
-				Body: fs.readFileSync(restorePosFile)
 			}).promise()
-		]).then(() => {
+		];
+
+		if (hasRestorePos) {
+			uploads.push(
+				s3.putObject({
+					Bucket: userdata_bucket,
+					Key: s3RestorePosPath,
+					Body: fs.readFileSync(restorePosFile)
+				}).promise()
+			);
+		}
+
+		Promise.all(uploads).then(() => {
 			console.log("[CHECKPOINT] ✓ Restore files backed up successfully to S3");
 			console.log("[CHECKPOINT] Location: s3://" + userdata_bucket + "/" + manifestpath + "/restore/");
 			success(true);
@@ -366,8 +392,9 @@ function runHashcat(params) {
 		});
 
 		// Watch restore files for changes and backup when they change
-		const restoreFile = `/root/${session_name}.restore`;
-		const restorePosFile = `/root/${session_name}.restore.pos`;
+		// Note: Modern hashcat creates restore files in its installation directory
+		const restoreFile = `/root/hashcat/${session_name}.restore`;
+		const restorePosFile = `/root/hashcat/${session_name}.restore.pos`;
 		let backupTimeout = null;
 		let isWatching = true;
 
@@ -377,66 +404,59 @@ function runHashcat(params) {
 			}
 			backupTimeout = setTimeout(() => {
 				if (isWatching) {
-					backupRestoreFiles().catch((err) => {
-						console.log("Failed to backup restore files:", err);
-					});
+					// Check if restore file exists (.pos file is optional)
+					if (fs.existsSync(restoreFile)) {
+						backupRestoreFiles().catch((err) => {
+							console.log("Failed to backup restore files:", err);
+						});
+					} else {
+						console.log("[CHECKPOINT] Waiting for restore file to be created...");
+					}
 				}
 			}, 2000); // Debounce: wait 2 seconds after last change
 		};
 
-		try {
-			const restoreWatcher = fs.watch(restoreFile, (eventType, filename) => {
-				if (eventType === 'change') {
-					console.log(`Restore file changed, backing up...`);
-					debouncedBackup();
-				}
-			});
+		// Use fs.watchFile() which handles non-existent files gracefully
+		// This polls the filesystem every 2 seconds
+		console.log("Setting up restore file watchers...");
 
-			const restorePosWatcher = fs.watch(restorePosFile, (eventType, filename) => {
-				if (eventType === 'change') {
-					console.log(`Restore position file changed, backing up...`);
-					debouncedBackup();
-				}
-			});
+		fs.watchFile(restoreFile, { interval: 2000 }, (curr, prev) => {
+			// File exists when size > 0, and has been modified when mtime changes
+			if (curr.size > 0 && curr.mtime > prev.mtime && isWatching) {
+				console.log(`Restore file changed (size: ${curr.size} bytes), backing up...`);
+				debouncedBackup();
+			}
+		});
 
-			// Store watchers to close them later
-			hashcat.restoreWatcher = restoreWatcher;
-			hashcat.restorePosWatcher = restorePosWatcher;
-		} catch (err) {
-			// Restore files don't exist yet, will be created by hashcat
-			console.log("Restore files not yet created, will watch once created");
-			// Fallback to periodic check every 30 seconds
-			const checkInterval = setInterval(() => {
-				if (fs.existsSync(restoreFile) && fs.existsSync(restorePosFile)) {
-					clearInterval(checkInterval);
-					try {
-						const restoreWatcher = fs.watch(restoreFile, (eventType) => {
-							if (eventType === 'change' && isWatching) {
-								console.log(`Restore file changed, backing up...`);
-								debouncedBackup();
-							}
-						});
-						const restorePosWatcher = fs.watch(restorePosFile, (eventType) => {
-							if (eventType === 'change' && isWatching) {
-								console.log(`Restore position file changed, backing up...`);
-								debouncedBackup();
-							}
-						});
-						hashcat.restoreWatcher = restoreWatcher;
-						hashcat.restorePosWatcher = restorePosWatcher;
-						console.log("Restore file watchers initialized");
-					} catch (watchErr) {
-						console.log("Error setting up file watchers:", watchErr);
-					}
-				}
-			}, 30000);
-			hashcat.checkInterval = checkInterval;
-		}
+		fs.watchFile(restorePosFile, { interval: 2000 }, (curr, prev) => {
+			// File exists when size > 0, and has been modified when mtime changes
+			if (curr.size > 0 && curr.mtime > prev.mtime && isWatching) {
+				console.log(`Restore position file changed (size: ${curr.size} bytes), backing up...`);
+				debouncedBackup();
+			}
+		});
+
+		console.log("Restore file watchers initialized (fs.watchFile with 2s interval)");
+		console.log("  - Watches:", restoreFile);
+		console.log("  - Watches:", restorePosFile);
 
 		var output = "";
 		hashcat.stdout.on('data', function(data) {
-			readOutput(data);
-			output += data;
+			// Try to parse as JSON status, if not JSON then log as regular output
+			const dataStr = data.toString();
+			const parsedStatus = readOutput(dataStr);
+
+			if (!parsedStatus) {
+				// Not JSON status - log as regular hashcat output
+				const lines = dataStr.trim().split('\n');
+				lines.forEach(line => {
+					if (line.trim()) {
+						console.log("[HASHCAT] " + line);
+					}
+				});
+			}
+
+			output += dataStr;
 			output = output.split("\n").pop();
 		});
 
@@ -448,16 +468,14 @@ function runHashcat(params) {
 			// Stop watching and clean up watchers
 			isWatching = false;
 			if (backupTimeout) clearTimeout(backupTimeout);
-			if (hashcat.checkInterval) clearInterval(hashcat.checkInterval);
-			if (hashcat.restoreWatcher) {
-				try {
-					hashcat.restoreWatcher.close();
-				} catch (e) { /* ignore */ }
-			}
-			if (hashcat.restorePosWatcher) {
-				try {
-					hashcat.restorePosWatcher.close();
-				} catch (e) { /* ignore */ }
+
+			// Cleanup fs.watchFile() watchers
+			try {
+				fs.unwatchFile(restoreFile);
+				fs.unwatchFile(restorePosFile);
+				console.log("Restore file watchers stopped");
+			} catch (e) {
+				// Ignore cleanup errors
 			}
 
 			/* 	Only treating negative numbers as actual errors, based on:
@@ -492,22 +510,29 @@ function runHashcat(params) {
 
 function cleanupRestoreFiles() {
 	return new Promise((success, failure) => {
-		const restoreFile = `/root/${session_name}.restore`;
-		const restorePosFile = `/root/${session_name}.restore.pos`;
+		// Note: Modern hashcat creates restore files in its installation directory
+		const restoreFile = `/root/hashcat/${session_name}.restore`;
+		const restorePosFile = `/root/hashcat/${session_name}.restore.pos`;
 		const s3RestorePath = `${manifestpath}/restore/${session_name}.restore`;
 		const s3RestorePosPath = `${manifestpath}/restore/${session_name}.restore.pos`;
 
 		console.log("Cleaning up restore files...");
 
-		// Delete local restore files
+		// Delete local restore files (.pos file is optional)
 		try {
-			if (fs.existsSync(restoreFile)) fs.unlinkSync(restoreFile);
-			if (fs.existsSync(restorePosFile)) fs.unlinkSync(restorePosFile);
+			if (fs.existsSync(restoreFile)) {
+				fs.unlinkSync(restoreFile);
+				console.log("Deleted local restore file");
+			}
+			if (fs.existsSync(restorePosFile)) {
+				fs.unlinkSync(restorePosFile);
+				console.log("Deleted local restore.pos file");
+			}
 		} catch (err) {
 			console.log("Error deleting local restore files:", err);
 		}
 
-		// Delete S3 restore files
+		// Delete S3 restore files (.pos file is optional)
 		Promise.all([
 			s3.deleteObject({ Bucket: userdata_bucket, Key: s3RestorePath }).promise().catch(() => {}),
 			s3.deleteObject({ Bucket: userdata_bucket, Key: s3RestorePosPath }).promise().catch(() => {})
