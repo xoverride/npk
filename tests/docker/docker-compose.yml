@@ -46,6 +46,8 @@ services:
       - APIGATEWAY=test-gateway
       - AWS_ENDPOINT_URL=http://localstack:4566
       - S3_ENDPOINT=http://localstack:4566
+      - ENABLE_HASHCAT_OUTPUT=1
+      - TEST_SCENARIO=${TEST_SCENARIO:-}
     volumes:
       - "./test-results:/test-results"
       - "./scripts:/app/tests/docker/scripts:ro"

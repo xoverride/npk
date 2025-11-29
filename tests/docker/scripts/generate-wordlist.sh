@@ -8,13 +8,14 @@ OUTPUT_FILE="$1"
 WORDLIST_SIZE=${2:-20000}  # Default 20k entries
 TEST_PASSWORDS_FILE="${3:-}"
 
-# Calculate where to insert test passwords (90% through the list)
-INSERT_POSITION=$((WORDLIST_SIZE * 90 / 100))
+# Calculate where to insert test passwords (98% through the list)
+# This ensures checkpoints are created and tested before passwords are found
+INSERT_POSITION=$((WORDLIST_SIZE * 98 / 100))
 
 echo "Generating wordlist with $WORDLIST_SIZE entries..."
 if [ -n "$TEST_PASSWORDS_FILE" ] && [ -f "$TEST_PASSWORDS_FILE" ]; then
     PASS_COUNT=$(wc -l < "$TEST_PASSWORDS_FILE")
-    echo "Test passwords ($PASS_COUNT) will be inserted at position $INSERT_POSITION (90% through)"
+    echo "Test passwords ($PASS_COUNT) will be inserted at position $INSERT_POSITION (98% through)"
 else
     echo "No test passwords file provided - generating pure decoy wordlist"
 fi
@@ -25,7 +26,7 @@ counter=0
     for i in $(seq 1 $WORDLIST_SIZE); do
         counter=$((counter + 1))
 
-        # At 90% position, insert test passwords
+        # At 98% position, insert test passwords
         if [ $counter -eq $INSERT_POSITION ] && [ -n "$TEST_PASSWORDS_FILE" ] && [ -f "$TEST_PASSWORDS_FILE" ]; then
             cat "$TEST_PASSWORDS_FILE"
         fi
@@ -48,4 +49,4 @@ counter=0
 
 ACTUAL_COUNT=$(wc -l < "$OUTPUT_FILE")
 echo "Generated wordlist with $ACTUAL_COUNT entries"
-echo "Correct passwords are at 90% position to ensure checkpoint testing"
+echo "Correct passwords are at 98% position to ensure checkpoint testing"

@@ -1,0 +1,122 @@
+version: '3.8'
+
+services:
+  # LocalStack for mocking AWS S3
+  localstack:
+    image: localstack/localstack:latest
+    container_name: npk-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3
+      - DEBUG=0
+      - AWS_DEFAULT_REGION=us-east-1
+      - PERSISTENCE=0
+    volumes:
+      - "./localstack-init:/etc/localstack/init/ready.d"
+    networks:
+      - npk-test-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+
+  # Orchestrator - Sets up test data and monitors instances
+  npk-orchestrator:
+    platform: linux/amd64
+    build:
+      context: ../..
+      dockerfile: tests/docker/Dockerfile
+    container_name: npk-orchestrator
+    depends_on:
+      localstack:
+        condition: service_healthy
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - S3_ENDPOINT=http://localstack:4566
+      - TEST_BUCKET=npk-test-bucket
+    volumes:
+      - "./test-results:/test-results"
+      - "./scripts:/app/tests/docker/scripts:ro"
+      - "test-data:/shared-test-data"
+      - "/var/run/docker.sock:/var/run/docker.sock"  # Mount Docker socket
+    networks:
+      - npk-test-network
+    command: /bin/bash -c "sleep 5 && /app/tests/docker/scripts/orchestrator.sh"
+
+  # NPK Instance 1
+  npk-instance-1:
+    platform: linux/amd64
+    build:
+      context: ../..
+      dockerfile: tests/docker/Dockerfile
+    container_name: npk-instance-1
+    depends_on:
+      npk-orchestrator:
+        condition: service_started
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+      - REGION=us-east-1
+      - USERDATAREGION=us-east-1
+      - USERDATA=npk-test-bucket
+      - INSTANCEID=i-instance-1
+      - INSTANCENUMBER=1
+      - INSTANCECOUNT=2
+      - APIGATEWAY=test-gateway
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - S3_ENDPOINT=http://localstack:4566
+      - ENABLE_HASHCAT_OUTPUT=1
+    volumes:
+      - "./test-results:/test-results"
+      - "./scripts:/app/tests/docker/scripts:ro"
+      - "../../tools/compute-node/hashcat_wrapper.js:/app/hashcat_wrapper.js:ro"
+      - "test-data:/shared-test-data:ro"
+    networks:
+      - npk-test-network
+    command: /bin/bash -c "/app/tests/docker/scripts/run-instance.sh 1"
+
+  # NPK Instance 2
+  npk-instance-2:
+    platform: linux/amd64
+    build:
+      context: ../..
+      dockerfile: tests/docker/Dockerfile
+    container_name: npk-instance-2
+    depends_on:
+      npk-orchestrator:
+        condition: service_started
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+      - REGION=us-east-1
+      - USERDATAREGION=us-east-1
+      - USERDATA=npk-test-bucket
+      - INSTANCEID=i-instance-2
+      - INSTANCENUMBER=2
+      - INSTANCECOUNT=2
+      - APIGATEWAY=test-gateway
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - S3_ENDPOINT=http://localstack:4566
+      - ENABLE_HASHCAT_OUTPUT=1
+    volumes:
+      - "./test-results:/test-results"
+      - "./scripts:/app/tests/docker/scripts:ro"
+      - "../../tools/compute-node/hashcat_wrapper.js:/app/hashcat_wrapper.js:ro"
+      - "test-data:/shared-test-data:ro"
+    networks:
+      - npk-test-network
+    command: /bin/bash -c "/app/tests/docker/scripts/run-instance.sh 2"
+
+volumes:
+  test-data:
+
+networks:
+  npk-test-network:
+    driver: bridge
