@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  # LocalStack for mocking AWS S3
+  localstack:
+    image: localstack/localstack:latest
+    container_name: npk-localstack
+    ports:
+      - "4566:4566"  # LocalStack gateway
+      - "4571:4571"  # LocalStack S3
+    environment:
+      - SERVICES=s3
+      - DEBUG=0
+      - AWS_DEFAULT_REGION=us-east-1
+      - PERSISTENCE=0
+    volumes:
+      - "./localstack-init:/etc/localstack/init/ready.d"
+    networks:
+      - npk-test-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+
+  # NPK Restore Test Environment
+  npk-restore-test:
+    platform: linux/amd64  # Force x86_64 for hashcat compatibility
+    build:
+      context: ../..  # Build from project root
+      dockerfile: tests/docker/Dockerfile
+    container_name: npk-restore-test
+    depends_on:
+      localstack:
+        condition: service_healthy
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+      - REGION=us-east-1
+      - USERDATAREGION=us-east-1
+      - USERDATA=npk-test-bucket
+      - INSTANCEID=i-test-instance-1
+      - INSTANCENUMBER=1
+      - INSTANCECOUNT=1
+      - APIGATEWAY=test-gateway
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - S3_ENDPOINT=http://localstack:4566
+    volumes:
+      - "./test-results:/test-results"
+      - "./scripts:/app/tests/docker/scripts:ro"
+      - "./localstack-init:/etc/localstack/init/ready.d:ro"
+      - "../../tools/compute-node/hashcat_wrapper.js:/app/hashcat_wrapper.js:ro"
+    networks:
+      - npk-test-network
+    command: /bin/bash -c "sleep 5 && /app/tests/docker/scripts/run-e2e-tests.sh"
+
+volumes:
+  localstack-data:
+
+networks:
+  npk-test-network:
+    driver: bridge
