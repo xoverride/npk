@@ -60,6 +60,10 @@
 			"npk_instance_role_attach_ssm": {
 				"role": "${aws_iam_role.npk_instance_role.id}",
 				"policy_arn": "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+			},
+			"npk_instance_role_attach_cloudwatch": {
+				"role": "${aws_iam_role.npk_instance_role.id}",
+				"policy_arn": "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
 			}
 		}
 	},

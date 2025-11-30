@@ -624,6 +624,22 @@ local regionKeys = std.objectFields(settings.regions);
 				"${aws_s3_bucket.user_data.arn}/*"
 			]
 		},{
+			sid: "s3ListBucket",
+			actions: [
+				"s3:ListBucket"
+			],
+			resources: [
+				"${aws_s3_bucket.user_data.arn}"
+			]
+		},{
+			sid: "s3PutManifest",
+			actions: [
+				"s3:PutObject"
+			],
+			resources: [
+				"${aws_s3_bucket.user_data.arn}/*/campaigns/*/manifest.json"
+			]
+		},{
 			sid: "ec2",
 			actions: [
 				"ec2:DescribeImages",
