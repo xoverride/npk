@@ -33,10 +33,10 @@
                     </div>
                     <div class="col-lg-10 text-center" style="padding-top: 8px;">
                      <div class="progress" style="height: 6px;">
-                        <div class="progress-bar bg-warning progress-bar-striped" ng-class="{'progress-bar-animated': data.active}" role="progressbar" style="width: {{ ((node.first - data.base.effectiveStartTime) / data.base.durationSeconds) * 100 }}%"></div>
+                        <div class="progress-bar bg-warning progress-bar-striped" ng-class="{'progress-bar-animated': data.active}" role="progressbar" style="width: {{ ((node.first - data.base.startTime) / data.base.durationSeconds) * 100 }}%"></div>
                         <div class="progress-bar bg-primary progress-bar-striped" ng-class="{'progress-bar-animated': data.active}" role="progressbar" style="width: {{ ((node.firstRecovery - node.first) / data.base.durationSeconds) * 100 }}%"></div>
                         <div class="progress-bar bg-success progress-bar-striped" ng-class="{'progress-bar-animated': data.active}" role="progressbar" style="width: {{ ((node.last - node.firstRecovery) / data.base.durationSeconds) * 100 }}%"></div>
-                        <div class="progress-bar bg-dark progress-bar-striped" ng-class="{'progress-bar-animated': data.active}" role="progressbar" style="width: {{ (((data.base.effectiveStartTime + data.base.durationSeconds) - node.last) / data.base.durationSeconds) * 100 }}%"></div>
+                        <div class="progress-bar bg-dark progress-bar-striped" ng-class="{'progress-bar-animated': data.active}" role="progressbar" style="width: {{ (((data.base.startTime + data.base.durationSeconds) - node.last) / data.base.durationSeconds) * 100 }}%"></div>
                      </div>
                      <small class="text-white">
                       Spot Status: [ {{ data.base.spotRequestStatus[nid].State }}; {{ data.base.spotRequestStatus[nid].Status.Code }} ]
@@ -44,7 +44,7 @@
                       Spot Fulfillment Message: [ {{ data.base.spotRequestStatus[nid].Status.Message }} ]
                       <br>
                       Hashcat: {{ node['latest'].progress | number:2 }}% |
-                      Time: {{ ((node.last - data.base.effectiveStartTime) / data.base.durationSeconds) * 100 | number:2 }}% |
+                      Time: {{ ((now()/1000 - data.base.effectiveStartTime) / data.base.durationSeconds) * 100 | number:2 }}% |
                       Price: {{ (data.base.totalPrice / data.base.targetPrice) * 100 | number:2 }}%
                     </small>
                     </div>
@@ -102,15 +102,15 @@
             <div class="col-lg-2 col-md-6 col-sm-12">
               <div class="card bg-white shadow-none mt-3 border border-secondary-dark">
                 <div class="card-header bg-white text-dark text-center">
-                  Instance
-                  <div ng-if="data.base.resumeMetadata && data.base.resumeMetadata.resumeInstanceCount">
+                  <span ng-if="data.base.resumeMetadata && data.base.resumeMetadata.resumeInstanceCount">
+                    Instance<br>
                     <small class="text-warning">
                       ({{ data.base.resumeMetadata.resumeInstanceCount }}/{{ data.base.resumeMetadata.originalInstanceCount }} resumed)
                     </small>
-                  </div>
-                  <div ng-if="!data.base.resumeMetadata || !data.base.resumeMetadata.resumeInstanceCount">
-                    (x{{ manifest.instanceCount }})
-                  </div>
+                  </span>
+                  <span ng-if="!data.base.resumeMetadata || !data.base.resumeMetadata.resumeInstanceCount">
+                    Instance (x{{ manifest.instanceCount }})
+                  </span>
                 </div>
                 <div class="card-body bg-dark text-white text-left">
                   <h4 class="text-white"><small>Generation:</small> {{ manifest.instanceGeneration }}</h4>
@@ -205,7 +205,7 @@
                     </div>
                     Provisioning:
                      <small>
-                      {{ first | momentfn:'from':(data.base.effectiveStartTime * 1000):true }}
+                      {{ first | momentfn:'from':(data.base.startTime * 1000):true }}
                     </small>
                   </div>
 
@@ -215,7 +215,7 @@
                     </div>
                     First Crack:
                      <small>
-                      {{ firstRecovery | momentfn:'from':(data.base.effectiveStartTime * 1000):true }}
+                      {{ firstRecovery | momentfn:'from':(data.base.startTime * 1000):true }}
                     </small>
                   </div>
 
@@ -225,7 +225,16 @@
                     </div>
                     Finished
                      <small>
-                      {{ last | momentfn:'from':(data.base.effectiveStartTime * 1000) }}
+                      {{ last | momentfn:'from':(data.base.startTime * 1000) }}
+                    </small>
+                  </div>
+                  <div ng-if="data.base.resumeCount > 0" class="mt-2">
+                    <div class="badge badge-warning" data-toggle="tooltip" data-placement="left" title="" data-original-title="Total time across all resume attempts since original campaign start.">
+                      <i class="fa fa-question-circle"></i>
+                    </div>
+                    Total Runtime:
+                     <small>
+                      {{ ((now() - data.base.effectiveStartTime * 1000) / 1000) | momentfn:'duration':true }}
                     </small>
                   </div>
                   <div style="border-bottom: 1px solid white;">&nbsp;</div>
@@ -257,7 +266,7 @@
                     </div>
                     <div class="col-md-3">
                       <h5 class="text-warning"><small>Campaign Runtime:</small></h5>
-                      <h4 class="text-white">{{ (Date.now()/1000 - data.base.effectiveStartTime) | momentfn:'duration':true }}</h4>
+                      <h4 class="text-white">{{ ((now() - data.base.effectiveStartTime * 1000) / 1000) | momentfn:'duration':true }}</h4>
                       <small class="text-muted">across all attempts</small>
                     </div>
                   </div>
@@ -326,7 +335,7 @@
                       <h6 class="text-white">
                         <span class="badge badge-warning">Previous Fleet #{{ fleet.attemptNumber }}</span>
                         {{ fleet.spotFleetRequestId }}
-                        <small class="ml-2">(terminated {{ fleet.terminatedAt * 1000 | momentfn:'from':(data.base.effectiveStartTime * 1000) }}, cost: ${{ fleet.fleetPrice | number:2 }})</small>
+                        <small class="ml-2">(terminated {{ fleet.terminatedAt * 1000 | date:'MMM d @ H:mm' }}, cost: ${{ (fleet.fleetPrice || 0) | number:2 }})</small>
                       </h6>
                       <table class="table table-dark table-condensed" ng-if="fleet.spotRequestHistory">
                         <thead>
