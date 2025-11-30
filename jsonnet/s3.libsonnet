@@ -6,13 +6,31 @@ local cors_rule(origin) = {
 	"max_age_seconds": 3000
 };
 
-local bucket(name, cors=null) =
+local lifecycle_rule = {
+	"id": "expire-restore-files",
+	"enabled": true,
+	"filter": {
+		"prefix": "*/campaigns/*/restore/"
+	},
+	"expiration": {
+		"days": 7
+	}
+};
+
+local bucket(name, cors=null, lifecycle=true) =
 	if std.type(cors) == "null" then
-		{ "bucket_prefix": name, "force_destroy": true}
+		if lifecycle then
+			{ "bucket_prefix": name, "force_destroy": true, "lifecycle_rule": [lifecycle_rule] }
+		else
+			{ "bucket_prefix": name, "force_destroy": true }
 	else
-		{ "bucket_prefix": name, "force_destroy": true, "cors_rule": cors };
+		if lifecycle then
+			{ "bucket_prefix": name, "force_destroy": true, "cors_rule": cors, "lifecycle_rule": [lifecycle_rule] }
+		else
+			{ "bucket_prefix": name, "force_destroy": true, "cors_rule": cors };
 
 {
 	"cors_rule": cors_rule,
+	"lifecycle_rule": lifecycle_rule,
 	"bucket": bucket
 }

@@ -89,7 +89,8 @@
 					],
 					"resources": [
 						"${aws_s3_bucket.user_data.arn}/*/campaigns/*/manifest.json",
-						"${aws_s3_bucket.user_data.arn}/*/campaigns/*/potfiles/*"
+						"${aws_s3_bucket.user_data.arn}/*/campaigns/*/potfiles/*",
+						"${aws_s3_bucket.user_data.arn}/*/campaigns/*/restore/*"
 					]
 				}, {
 					"sid": "4",
@@ -97,7 +98,8 @@
 						"s3:PutObject"
 					],
 					"resources": [
-						"${aws_s3_bucket.user_data.arn}/*/campaigns/*/potfiles/*"
+						"${aws_s3_bucket.user_data.arn}/*/campaigns/*/potfiles/*",
+						"${aws_s3_bucket.user_data.arn}/*/campaigns/*/restore/*"
 					]
 				}, {
 					"sid": "5",
@@ -113,6 +115,7 @@
 						"variable": "s3:prefix",
 						"values": [
 							"*/campaigns/*/potfiles/",
+							"*/campaigns/*/restore/"
 						]
 					}
 				}, {
