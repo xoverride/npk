@@ -568,7 +568,7 @@ exports.main = async function(event, context, callback) {
 		if (isResume) {
 			updateParams.resumable = { BOOL: false };
 			updateParams.interrupted = { NULL: true };
-			updateParams.resumeMetadata = aws.DynamoDB.Converter.marshall(resumeMetadata);
+			updateParams.resumeMetadata = { M: aws.DynamoDB.Converter.marshall(resumeMetadata) };
 			updateParams.resumeCount = { N: (campaign.Items[0].resumeCount?.N ? parseInt(campaign.Items[0].resumeCount.N) + 1 : 1).toString() };
 
 			console.log(`[RESUME] SUCCESS: Campaign ${campaignId} resumed successfully`);
