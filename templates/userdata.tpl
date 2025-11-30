@@ -117,8 +117,8 @@ cat /root/monitor_instance_action.sh
 # But restore files use SESSIONPATTERN (logical slot, transferable between instances)
 echo "* * * * * root /usr/local/bin/aws --region $USERDATAREGION s3 sync s3://$USERDATA/$ManifestPath/potfiles/ /potfiles/ --exclude \"*$${INSTANCEID}*\" --exclude \"*benchmark-results*\"" >> /etc/crontab
 echo "* * * * * root /usr/local/bin/aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --include \"*$${INSTANCEID}*\" --include \"*benchmark-results*\"" >> /etc/crontab
-echo "* * * * * root /usr/local/bin/aws --region $USERDATAREGION s3 sync s3://$USERDATA/$ManifestPath/restore/ /root/ --include \"*$${SESSIONPATTERN}*\"" >> /etc/crontab
-echo "* * * * * root /usr/local/bin/aws --region $USERDATAREGION s3 sync /root/ s3://$USERDATA/$ManifestPath/restore/ --include \"*.restore\" --include \"*.restore.pos\" --exclude \"*\" --exclude \"*\"" >> /etc/crontab
+echo "* * * * * root /usr/local/bin/aws --region $USERDATAREGION s3 sync s3://$USERDATA/$ManifestPath/restore/ /root/ --include \"$${SESSIONPATTERN}.restore\" --include \"$${SESSIONPATTERN}.restore.pos\"" >> /etc/crontab
+echo "* * * * * root /usr/local/bin/aws --region $USERDATAREGION s3 sync /root/ s3://$USERDATA/$ManifestPath/restore/ --include \"*.restore\" --include \"*.restore.pos\"" >> /etc/crontab
 echo "* * * * * root /root/monitor_instance_action.sh" >> /etc/crontab
 
 aws ec2 describe-spot-fleet-instances --region $REGION --spot-fleet-request-id $SpotFleet | jq '.ActiveInstances[].InstanceId' | sort > fleet_instances
