@@ -286,29 +286,67 @@ exports.main = async function(event, context, callback) {
 	}
 
 	// Test whether the provided presigned URL is expired.
+	// For resume operations, generate a fresh presigned URL
 
-	let expires, duration;
+	if (!isResume) {
+		let expires, duration;
 
-	try {
-		expires = /[^-]Expires=([\d]+)&/.exec(manifest.hashFileUrl)?.[1];
+		try {
+			expires = /[^-]Expires=([\d]+)&/.exec(manifest.hashFileUrl)?.[1];
 
-		if (!!!expires) {
-			let date = /X-Amz-Date=([^&]+)&/.exec(manifest.hashFileUrl)?.[1];
-			let seconds = /X-Amz-Expires=([\d]+)&/.exec(manifest.hashFileUrl)?.[1];
+			if (!!!expires) {
+				let date = /X-Amz-Date=([^&]+)&/.exec(manifest.hashFileUrl)?.[1];
+				let seconds = /X-Amz-Expires=([\d]+)&/.exec(manifest.hashFileUrl)?.[1];
 
-			date = new Date(Date.parse(date.replace(/(....)(..)(..T..)(..)/, "$1-$2-$3:$4:"))).getTime();
+				date = new Date(Date.parse(date.replace(/(....)(..)(..T..)(..)/, "$1-$2-$3:$4:"))).getTime();
 
-			expires = date + (seconds * 1000)
+				expires = date + (seconds * 1000)
+			}
+
+			duration = expires - (new Date().getTime() / 1000);
+
+			if (duration < 900) {
+				return respond(400, {}, `hashFileUrl must be valid for at least 900 seconds, got ${Math.floor(duration)}`, false);
+			}
+		} catch (e) {
+			console.log(e);
+			return respond(400, {}, "Invalid hashFileUrl; missing expiration", false);
+		}
+	} else {
+		console.log(`[RESUME] Generating fresh presigned URL for hash file`);
+
+		// Generate a fresh presigned URL for the hash file stored in S3
+		if (!manifest.hashFile) {
+			return respond(400, {}, "Cannot resume: manifest is missing hashFile reference", false);
 		}
 
-		duration = expires - (new Date().getTime() / 1000);
+		try {
+			const hashFileKey = `${entity}/${manifest.hashFile}`;
+			console.log(`[RESUME] Hash file location: s3://${variables.userdata_bucket}/${hashFileKey}`);
 
-		if (duration < 900) {
-			return respond(400, {}, `hashFileUrl must be valid for at least 900 seconds, got ${Math.floor(duration)}`, false);
+			// Generate presigned URL valid for 4 hours (14400 seconds)
+			const freshUrl = s3.getSignedUrl('getObject', {
+				Bucket: variables.userdata_bucket,
+				Key: hashFileKey,
+				Expires: 14400
+			});
+
+			manifest.hashFileUrl = freshUrl;
+			console.log(`[RESUME] Generated fresh presigned URL (valid for 4 hours)`);
+
+			// Update manifest.json in S3 with the fresh URL
+			const manifestKey = `${entity}/campaigns/${campaignId}/manifest.json`;
+			await s3.putObject({
+				Bucket: variables.userdata_bucket,
+				Key: manifestKey,
+				Body: JSON.stringify(manifest),
+				ContentType: 'application/json'
+			}).promise();
+			console.log(`[RESUME] Updated manifest.json in S3 with fresh hashFileUrl`);
+		} catch (err) {
+			console.error(`[RESUME] ERROR generating presigned URL:`, err);
+			return respond(500, {}, `Failed to generate presigned URL for hash file: ${err.message}`, false);
 		}
-	} catch (e) {
-		console.log(e);
-		return respond(400, {}, "Invalid hashFileUrl; missing expiration", false);
 	}
 
 	// Campaign is valid. Get AZ pricing and Image AMI
