@@ -171,6 +171,9 @@ exports.main = async function(event, context, callback) {
 				// Check if this was a capacity termination (should be resumable)
 				const wasCapacityTerminated = checkForCapacityTermination(fleet);
 
+				// NEW: Check if instances completed work before fleet was cancelled
+				const allInstancesCompletedWork = checkIfInstancesCompletedWork(fleet);
+
 				const updateData = {
 					active: false,
 					spotRequestHistory: fleet.history,
@@ -178,21 +181,30 @@ exports.main = async function(event, context, callback) {
 					status: fleetState
 				};
 
-				if (wasCapacityTerminated) {
+				// Only mark as resumable if:
+				// 1. Fleet had capacity issues AND
+				// 2. Instances did NOT complete their work
+				if (wasCapacityTerminated && !allInstancesCompletedWork) {
 					console.log(`[CAPACITY-LOSS] Fleet ${fleet.SpotFleetRequestId} was terminated due to capacity issues`);
 					console.log(`[CAPACITY-LOSS] Reason: ${wasCapacityTerminated.reason}`);
-					console.log(`[CAPACITY-LOSS] Marking campaign as resumable`);
+					console.log(`[CAPACITY-LOSS] Instances did not complete work - marking as resumable`);
 
 					updateData.resumable = true;
 					updateData.interrupted = "Capacity Loss";
 					updateData.interruptionTime = Math.floor(Date.now() / 1000);
 					updateData.interruptionReason = wasCapacityTerminated.reason;
 					updateData.interruptionDetails = wasCapacityTerminated.details;
+				} else if (wasCapacityTerminated && allInstancesCompletedWork) {
+					console.log(`[CAPACITY-LOSS] Fleet ${fleet.SpotFleetRequestId} had capacity issues BUT instances completed work`);
+					console.log(`[CAPACITY-LOSS] All instances terminated gracefully - NOT marking as resumable`);
+					console.log(`[CAPACITY-LOSS] This was a fleet-level config issue after work finished`);
 				}
 
 				promises.push(editCampaignViaRequestId(fleet.SpotFleetRequestId, updateData).then((data) => {
-					if (wasCapacityTerminated) {
+					if (wasCapacityTerminated && !allInstancesCompletedWork) {
 						console.log(`[CAPACITY-LOSS] Campaign ${fleet.SpotFleetRequestId} marked as resumable - restore files should be in S3`);
+					} else if (wasCapacityTerminated && allInstancesCompletedWork) {
+						console.log(`[+] Campaign ${fleet.SpotFleetRequestId} completed work despite fleet capacity issues - marked as ${fleetState}`);
 					} else {
 						console.log(`[+] Marked campaign of ${fleet.SpotFleetRequestId} as ${fleetState}`);
 					}
@@ -506,11 +518,19 @@ function editCampaignViaRequestId(spotFleetRequestId, values) {
 
 		// Check if campaign was already completed before marking as interrupted
 		if (values.interrupted && values.interrupted === "Capacity Loss") {
+			// Debug: Log campaign state before check
+			console.log(`[COMPLETION-CHECK] Campaign ${data.keyid}:`);
+			console.log(`[COMPLETION-CHECK]   progress: ${data.progress}`);
+			console.log(`[COMPLETION-CHECK]   status: ${data.status}`);
+			console.log(`[COMPLETION-CHECK]   nodes: ${data.nodes ? JSON.stringify(Object.keys(data.nodes)) : 'null'}`);
+
 			const alreadyCompleted = (
 				data.progress === 100 ||
 				data.status === 'COMPLETED' ||
 				(data.nodes && Object.values(data.nodes).every(n => n.status === 'Completed'))
 			);
+
+			console.log(`[COMPLETION-CHECK]   alreadyCompleted: ${alreadyCompleted}`);
 
 			if (alreadyCompleted) {
 				console.log(`[+] Campaign ${data.keyid} was already completed before termination`);
@@ -522,6 +542,8 @@ function editCampaignViaRequestId(spotFleetRequestId, values) {
 				delete values.interruptionTime;
 				delete values.interruptionReason;
 				delete values.interruptionDetails;
+			} else {
+				console.log(`[COMPLETION-CHECK] Campaign is NOT complete, marking as resumable`);
 			}
 		}
 			editCampaign(data.userid, data.keyid.split(':').slice(1), values).then((updates) => {
@@ -639,6 +661,72 @@ function checkForCapacityTermination(fleet) {
 	}
 
 	return capacityLoss;
+}
+
+function checkIfInstancesCompletedWork(fleet) {
+	// Check if all instances completed their work before fleet was cancelled
+	// This distinguishes between:
+	// 1. Instances interrupted mid-work (need resume)
+	// 2. Instances finished work, then fleet cancelled for config reasons (don't need resume)
+
+	const instances = Object.keys(fleet.instances);
+
+	if (instances.length === 0) {
+		console.log(`[INSTANCE-CHECK] No instances found - assuming no work completed`);
+		return false;
+	}
+
+	let allTerminated = true;
+	let hasSpotInterruptions = false;
+	let gracefulTerminations = 0;
+
+	instances.forEach((instanceId) => {
+		const instance = fleet.instances[instanceId];
+
+		// Check if instance is still running
+		if (['open', 'active'].indexOf(instance.State) > -1) {
+			console.log(`[INSTANCE-CHECK] Instance ${instanceId} still in state: ${instance.State}`);
+			allTerminated = false;
+		}
+
+		// Check for spot interruption indicators
+		if (instance.Status && instance.Status.Message) {
+			const spotInterruptionIndicators = [
+				'spot-instance-termination',
+				'instance-terminated-by-price',
+				'instance-terminated-by-user',
+				'marked-for-termination',
+				'instance-stopped-by-user'
+			];
+
+			spotInterruptionIndicators.forEach((indicator) => {
+				if (instance.Status.Message.includes(indicator)) {
+					console.log(`[INSTANCE-CHECK] Instance ${instanceId} was spot-interrupted: ${instance.Status.Message}`);
+					hasSpotInterruptions = true;
+				}
+			});
+		}
+
+		// Check if instance terminated gracefully (completed work and powered off)
+		if (instance.State === 'terminated' || instance.State === 'closed') {
+			gracefulTerminations++;
+		}
+	});
+
+	const totalInstances = instances.length;
+	const allInstancesTerminatedGracefully = (gracefulTerminations === totalInstances);
+
+	console.log(`[INSTANCE-CHECK] Summary for fleet ${fleet.SpotFleetRequestId}:`);
+	console.log(`[INSTANCE-CHECK]   Total instances: ${totalInstances}`);
+	console.log(`[INSTANCE-CHECK]   Graceful terminations: ${gracefulTerminations}`);
+	console.log(`[INSTANCE-CHECK]   All terminated: ${allTerminated}`);
+	console.log(`[INSTANCE-CHECK]   Has spot interruptions: ${hasSpotInterruptions}`);
+	console.log(`[INSTANCE-CHECK]   All completed work: ${allInstancesTerminatedGracefully && !hasSpotInterruptions}`);
+
+	// Instances completed work if:
+	// 1. All instances terminated gracefully AND
+	// 2. No spot interruption indicators found
+	return allInstancesTerminatedGracefully && !hasSpotInterruptions;
 }
 
 function getSpotRequestHistory(ec2, sfr, nextToken = null) {
