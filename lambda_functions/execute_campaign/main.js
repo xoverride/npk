@@ -555,11 +555,23 @@ exports.main = async function(event, context, callback) {
 	console.log(`Successfully requested spot fleet ${spotFleetRequest.SpotFleetRequestId}`);
 
 	try {
+		// Preserve original timing and pricing for resumed campaigns
+		const now = Math.floor(new Date().getTime() / 1000);
+		const originalStartTime = isResume && campaign.Items[0].originalStartTime?.N
+			? parseInt(campaign.Items[0].originalStartTime.N)
+			: now;
+		const accumulatedPrice = isResume && campaign.Items[0].accumulatedPrice?.N
+			? parseFloat(campaign.Items[0].accumulatedPrice.N)
+			: 0;
+
 		const updateParams = aws.DynamoDB.Converter.marshall({
 			active: true,
 			status: "STARTING",
 			spotFleetRequestId: spotFleetRequest.SpotFleetRequestId,
-			startTime: Math.floor(new Date().getTime() / 1000),
+			startTime: now,  // Current resume time (for spot_monitor offset calculations)
+			originalStartTime: originalStartTime,  // Original campaign start (for total time calculations)
+			accumulatedPrice: accumulatedPrice,  // Sum of all previous fleet costs
+			currentFleetPrice: 0,  // Reset for new fleet
 			eventType: isResume ? "CampaignResumed" : "CampaignStarted",
 			lastuntil: 0,
 		});
@@ -569,12 +581,53 @@ exports.main = async function(event, context, callback) {
 			updateParams.resumable = { BOOL: false };
 			updateParams.interrupted = { NULL: true };
 			updateParams.resumeMetadata = { M: aws.DynamoDB.Converter.marshall(resumeMetadata) };
-			updateParams.resumeCount = { N: (campaign.Items[0].resumeCount?.N ? parseInt(campaign.Items[0].resumeCount.N) + 1 : 1).toString() };
+			const resumeCount = campaign.Items[0].resumeCount?.N ? parseInt(campaign.Items[0].resumeCount.N) + 1 : 1;
+			updateParams.resumeCount = { N: resumeCount.toString() };
+
+			// Build array of all previous fleet attempts (supports multiple resumes)
+			const previousFleets = campaign.Items[0].previousFleets?.L || [];
+
+			// Archive the current (about to be replaced) spot fleet
+			if (campaign.Items[0].spotFleetRequestId?.S) {
+				const currentFleetPrice = campaign.Items[0].currentFleetPrice?.N
+					? parseFloat(campaign.Items[0].currentFleetPrice.N)
+					: 0;
+
+				const archivedFleet = {
+					spotFleetRequestId: campaign.Items[0].spotFleetRequestId.S,
+					terminatedAt: Math.floor(Date.now() / 1000),
+					attemptNumber: resumeCount - 1,
+					fleetPrice: currentFleetPrice  // Cost of this specific fleet
+				};
+
+				// Archive history and status if they exist
+				if (campaign.Items[0].spotRequestHistory) {
+					archivedFleet.spotRequestHistory = campaign.Items[0].spotRequestHistory;
+				}
+
+				if (campaign.Items[0].spotRequestStatus) {
+					archivedFleet.spotRequestStatus = campaign.Items[0].spotRequestStatus;
+				}
+
+				// Add this fleet to the previousFleets array
+				previousFleets.push({ M: aws.DynamoDB.Converter.marshall(archivedFleet) });
+
+				// Update accumulatedPrice with this fleet's cost
+				updateParams.accumulatedPrice = { N: (accumulatedPrice + currentFleetPrice).toString() };
+
+				console.log(`[RESUME] Archiving fleet #${resumeCount - 1}: ${campaign.Items[0].spotFleetRequestId.S}`);
+				console.log(`[RESUME] Fleet cost: $${currentFleetPrice.toFixed(2)}`);
+				console.log(`[RESUME] Accumulated price: $${(accumulatedPrice + currentFleetPrice).toFixed(2)}`);
+				console.log(`[RESUME] Total archived fleets: ${previousFleets.length}`);
+			}
+
+			// Store the complete array of all previous attempts
+			updateParams.previousFleets = { L: previousFleets };
 
 			console.log(`[RESUME] SUCCESS: Campaign ${campaignId} resumed successfully`);
 			console.log(`[RESUME] Spot Fleet ID: ${spotFleetRequest.SpotFleetRequestId}`);
+			console.log(`[RESUME] This is resume attempt #${resumeCount}`);
 			console.log(`[RESUME] Launching ${resumeInstanceCount} instances`);
-			console.log(`[RESUME] Resume count: ${updateParams.resumeCount.N}`);
 		}
 
 		const updateCampaign = await ddb.updateItem({

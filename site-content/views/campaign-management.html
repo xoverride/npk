@@ -43,9 +43,9 @@
                       &nbsp;&nbsp;&nbsp;
                       Spot Fulfillment Message: [ {{ data.base.spotRequestStatus[nid].Status.Message }} ]
                       <br>
-                      Hashcat: {{ node['latest'].progress | number:2 }}% | 
-                      Time: {{ ((node.last - data.base.startTime) / data.base.durationSeconds) * 100 | number:2 }}% | 
-                      Price: {{ (data.base.price / data.base.targetPrice) * 100 | number:2 }}%
+                      Hashcat: {{ node['latest'].progress | number:2 }}% |
+                      Time: {{ ((node.last - data.base.effectiveStartTime) / data.base.durationSeconds) * 100 | number:2 }}% |
+                      Price: {{ (data.base.totalPrice / data.base.targetPrice) * 100 | number:2 }}%
                     </small>
                     </div>
                   </div>
@@ -64,6 +64,25 @@
                     <small class="ml-3 text-white">
                       {{ data.base.spotRequestStatus[nid].State }} / {{ data.base.spotRequestStatus[nid].Status.Code }};&nbsp;&nbsp;&nbsp;[ {{ data.base.spotRequestStatus[nid].Status.Message }} ]
                     </small>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Show instances from previous fleet attempts (for resumed campaigns) -->
+              <div ng-if="data.base.previousFleets && data.base.previousFleets.length > 0" class="mt-3">
+                <h6 class="text-warning"><small>Previous Fleet Instances:</small></h6>
+                <div ng-repeat="fleet in data.base.previousFleets">
+                  <div ng-repeat="(nid, node) in fleet.spotRequestStatus">
+                    <div class="row">
+                      <div class="col-lg-2" style="margin-top: 1px;">
+                        <small class="text-warning">{{ nid }}</small>
+                      </div>
+                      <div class="col-lg-10 text-center" style="padding-top: 8px;">
+                        <small class="ml-3 text-warning">
+                          [Fleet #{{ fleet.attemptNumber }}] {{ node.State }} / {{ node.Status.Code }};&nbsp;&nbsp;&nbsp;[ {{ node.Status.Message }} ]
+                        </small>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -112,7 +131,10 @@
                     </small>
                   </div>
                   <h5 class="text-white"><small>Region:</small> {{ manifest.region }}</h5><br/><br/>
-                  <h4 class="text-white"><small>Actual Price:</small> ${{ data.base.price | number:2 }}</h4>
+                  <h4 class="text-white"><small>Actual Price:</small> ${{ data.base.totalPrice | number:2 }}</h4>
+                  <small ng-if="data.base.accumulatedPrice > 0" class="text-warning">
+                    (Accumulated: ${{ data.base.accumulatedPrice | number:2 }} + Current: ${{ (data.base.currentFleetPrice || data.base.price) | number:2 }})
+                  </small>
                 </div>
               </div>
             </div>
@@ -170,7 +192,7 @@
                     </div>
                     Provisioning:
                      <small>
-                      {{ first | momentfn:'from':(data.base.startTime * 1000):true }}
+                      {{ first | momentfn:'from':(data.base.effectiveStartTime * 1000):true }}
                     </small>
                   </div>
 
@@ -180,7 +202,7 @@
                     </div>
                     First Crack:
                      <small>
-                      {{ firstRecovery | momentfn:'from':(data.base.startTime * 1000):true }}
+                      {{ firstRecovery | momentfn:'from':(data.base.effectiveStartTime * 1000):true }}
                     </small>
                   </div>
 
@@ -190,7 +212,7 @@
                     </div>
                     Finished
                      <small>
-                      {{ last | momentfn:'from':(data.base.startTime * 1000) }}
+                      {{ last | momentfn:'from':(data.base.effectiveStartTime * 1000) }}
                     </small>
                   </div>
                   <div style="border-bottom: 1px solid white;">&nbsp;</div>
@@ -214,31 +236,74 @@
                   Spot Fleet Request History
                 </div>
                 <div class="card-body bg-dark text-white text-left">
-                  <table class="table table-dark table-condensed">
-                    <thead>
-                      <tr>
-                        <th style="width: 120px;">Start Offset</th>
-                        <th style="width: 350px;">Event Type</th>
-                        <th>Description</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr ng-repeat="event in data.base.spotRequestHistory" on-finish-render>
-                        <td>
-                          <small>{{ event.Timestamp | momentfn:'from':(data.base.startTime * 1000):true }}</small>
-                        </td>
-                        <td>
-                          <small>{{ event.EventType }}&nbsp;->{{ (event.EventInformation.InstanceId) ? " " + event.EventInformation.InstanceId : "" }} {{ event.EventInformation.EventSubType }}</small>
-                        </td>
-                        <td>
-                          <small ng-if="!event.EventInformation.EventDescription.instanceType">{{ (event.EventInformation.EventDescription) ? event.EventInformation.EventDescription : "&lt; None &gt;" }}</small>
-                          <small ng-if="event.EventInformation.EventDescription.instanceType">
-                            {{ event.EventInformation.EventDescription.instanceType }} running {{ event.EventInformation.EventDescription.image }} in {{ event.EventInformation.EventDescription.availabilityZone }}
-                          </small>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
+                  <!-- Current Spot Fleet History -->
+                  <div ng-if="data.base.spotRequestHistory">
+                    <h6 class="text-white" ng-if="data.base.previousSpotRequestHistory">
+                      <span class="badge badge-success">Current Fleet</span>
+                      {{ data.base.spotFleetRequestId }}
+                    </h6>
+                    <table class="table table-dark table-condensed">
+                      <thead>
+                        <tr>
+                          <th style="width: 120px;">Start Offset</th>
+                          <th style="width: 350px;">Event Type</th>
+                          <th>Description</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr ng-repeat="event in data.base.spotRequestHistory" on-finish-render>
+                          <td>
+                            <small>{{ event.Timestamp | momentfn:'from':(data.base.startTime * 1000):true }}</small>
+                          </td>
+                          <td>
+                            <small>{{ event.EventType }}&nbsp;->{{ (event.EventInformation.InstanceId) ? " " + event.EventInformation.InstanceId : "" }} {{ event.EventInformation.EventSubType }}</small>
+                          </td>
+                          <td>
+                            <small ng-if="!event.EventInformation.EventDescription.instanceType">{{ (event.EventInformation.EventDescription) ? event.EventInformation.EventDescription : "&lt; None &gt;" }}</small>
+                            <small ng-if="event.EventInformation.EventDescription.instanceType">
+                              {{ event.EventInformation.EventDescription.instanceType }} running {{ event.EventInformation.EventDescription.image }} in {{ event.EventInformation.EventDescription.availabilityZone }}
+                            </small>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <!-- Previous Spot Fleet History (from earlier resume attempts) -->
+                  <div ng-if="data.base.previousFleets && data.base.previousFleets.length > 0">
+                    <div ng-repeat="fleet in data.base.previousFleets.reverse()" class="mt-4">
+                      <h6 class="text-white">
+                        <span class="badge badge-warning">Previous Fleet #{{ fleet.attemptNumber }}</span>
+                        {{ fleet.spotFleetRequestId }}
+                        <small class="ml-2">(terminated {{ fleet.terminatedAt * 1000 | momentfn:'from':(data.base.effectiveStartTime * 1000) }}, cost: ${{ fleet.fleetPrice | number:2 }})</small>
+                      </h6>
+                      <table class="table table-dark table-condensed" ng-if="fleet.spotRequestHistory">
+                        <thead>
+                          <tr>
+                            <th style="width: 120px;">Start Offset</th>
+                            <th style="width: 350px;">Event Type</th>
+                            <th>Description</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr ng-repeat="event in fleet.spotRequestHistory" on-finish-render>
+                            <td>
+                              <small>{{ event.Timestamp | momentfn:'from':(data.base.startTime * 1000):true }}</small>
+                            </td>
+                            <td>
+                              <small>{{ event.EventType }}&nbsp;->{{ (event.EventInformation.InstanceId) ? " " + event.EventInformation.InstanceId : "" }} {{ event.EventInformation.EventSubType }}</small>
+                            </td>
+                            <td>
+                              <small ng-if="!event.EventInformation.EventDescription.instanceType">{{ (event.EventInformation.EventDescription) ? event.EventInformation.EventDescription : "&lt; None &gt;" }}</small>
+                              <small ng-if="event.EventInformation.EventDescription.instanceType">
+                                {{ event.EventInformation.EventDescription.instanceType }} running {{ event.EventInformation.EventDescription.image }} in {{ event.EventInformation.EventDescription.availabilityZone }}
+                              </small>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

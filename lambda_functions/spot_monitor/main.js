@@ -391,12 +391,12 @@ exports.main = async function(event, context, callback) {
 
 			promises.push(editCampaignViaRequestId(fleetId, {
 				active: true,
-				price: fleet.price,
+				currentFleetPrice: fleet.price,  // Current fleet's cost only (not accumulated)
 				spotRequestHistory: fleet.history,
 				spotRequestStatus: fleet.instances,
 				status: fleetState
 			}).then((data) => {
-				console.log(`[+] Updated price of fleet ${fleetId}`);
+				console.log(`[+] Updated price of fleet ${fleetId}: $${fleet.price.toFixed(2)}`);
 			}, (e) => {
 				console.log(`[!] Failed attempting to update price for ${fleetId}`);
 			}));

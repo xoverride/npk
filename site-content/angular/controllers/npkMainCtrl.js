@@ -1841,6 +1841,14 @@ angular
         Object.keys(data).forEach(function(e) {
           campaigns[e].base = data[e];
 
+          // Calculate total price across all fleet attempts (for resumed campaigns)
+          const accumulatedPrice = parseFloat(campaigns[e].base.accumulatedPrice || 0);
+          const currentFleetPrice = parseFloat(campaigns[e].base.currentFleetPrice || campaigns[e].base.price || 0);
+          campaigns[e].base.totalPrice = accumulatedPrice + currentFleetPrice;
+
+          // Use originalStartTime for time calculations (handles multiple resumes)
+          campaigns[e].base.effectiveStartTime = campaigns[e].base.originalStartTime || campaigns[e].base.startTime;
+
           if (!Array.isArray(campaigns?.[e]?.base?.spotRequestHistory)) {
             return false;
           }
@@ -1850,6 +1858,36 @@ angular
               h.EventInformation.EventDescription = JSON.parse(h.EventInformation.EventDescription);
             }
           })
+
+          // Parse all previous fleets (supports multiple resume attempts)
+          if (Array.isArray(campaigns?.[e]?.base?.previousFleets)) {
+            campaigns[e].base.previousFleets.forEach(function(fleet) {
+              // Parse each fleet's spot request history
+              if (Array.isArray(fleet?.spotRequestHistory)) {
+                fleet.spotRequestHistory.forEach(function(h) {
+                  if (h.EventInformation.EventSubType == "launched" || h.EventInformation.EventSubType == "terminated") {
+                    h.EventInformation.EventDescription = JSON.parse(h.EventInformation.EventDescription);
+                  }
+                })
+              }
+            })
+          } else if (Array.isArray(campaigns?.[e]?.base?.previousSpotRequestHistory)) {
+            // Backward compatibility: convert old single-fleet format to new array format
+            campaigns[e].base.previousFleets = [{
+              spotFleetRequestId: campaigns[e].base.previousSpotFleetId,
+              spotRequestHistory: campaigns[e].base.previousSpotRequestHistory,
+              spotRequestStatus: campaigns[e].base.previousSpotRequestStatus,
+              attemptNumber: 1,
+              terminatedAt: Math.floor(Date.now() / 1000)
+            }];
+
+            // Parse the converted history
+            campaigns[e].base.previousFleets[0].spotRequestHistory.forEach(function(h) {
+              if (h.EventInformation.EventSubType == "launched" || h.EventInformation.EventSubType == "terminated") {
+                h.EventInformation.EventDescription = JSON.parse(h.EventInformation.EventDescription);
+              }
+            })
+          }
         });
       });
 
