@@ -9,9 +9,7 @@ local cors_rule(origin) = {
 local lifecycle_rule = {
 	"id": "expire-restore-files",
 	"enabled": true,
-	"filter": {
-		"prefix": "*/campaigns/*/restore/"
-	},
+	"prefix": "*/campaigns/*/restore/",
 	"expiration": {
 		"days": 7
 	}
