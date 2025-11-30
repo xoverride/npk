@@ -503,6 +503,27 @@ function editCampaignViaRequestId(spotFleetRequestId, values) {
 			data = aws.DynamoDB.Converter.unmarshall(data.Items[0]);
 			console.log("[+] Found campaign " + data.keyid.split(':').slice(1));
 
+
+		// Check if campaign was already completed before marking as interrupted
+		if (values.interrupted && values.interrupted === "Capacity Loss") {
+			const alreadyCompleted = (
+				data.progress === 100 ||
+				data.status === 'COMPLETED' ||
+				(data.nodes && Object.values(data.nodes).every(n => n.status === 'Completed'))
+			);
+
+			if (alreadyCompleted) {
+				console.log(`[+] Campaign ${data.keyid} was already completed before termination`);
+				console.log(`[+] Not marking as interrupted - work was finished`);
+
+				// Remove interrupted fields from update
+				delete values.interrupted;
+				delete values.resumable;
+				delete values.interruptionTime;
+				delete values.interruptionReason;
+				delete values.interruptionDetails;
+			}
+		}
 			editCampaign(data.userid, data.keyid.split(':').slice(1), values).then((updates) => {
 				success(updates);
 			});
