@@ -341,12 +341,14 @@ exports.main = async function(event, context, callback) {
 					return false;
 				}
 
-				let duration = instance.history.endTime - instance.history.startTime;
+				// Convert to milliseconds to match price timestamp format
+				let duration = (instance.history.endTime - instance.history.startTime) * 1000;
 
 				// This isn't a thing anymore. Fun times.
 				//duration = (duration < 3600) ? 3600 : duration;
 
-				let tempStartTime = instance.history.startTime;
+				// Convert to milliseconds to match price timestamp format
+				let tempStartTime = instance.history.startTime * 1000;
 
 				// console.log("duration: " + duration);
 				timestamps.forEach(function(e) {
@@ -355,7 +357,8 @@ exports.main = async function(event, context, callback) {
 						return true;
 					}
 
-					var ppms = prices[e] / 3600;
+					// Price per millisecond (hourly rate / 3600000)
+					var ppms = prices[e] / 3600000;
 					var mseconds = e - tempStartTime;
 
 					if (accSeconds + mseconds > duration) {
@@ -368,7 +371,7 @@ exports.main = async function(event, context, callback) {
 					tempStartTime += mseconds;
 				});
 
-				console.log(`[*] Instance ${instanceId} up for ${accSeconds} seconds; estimated cost $${accCost.toFixed(4)}`);
+				console.log(`[*] Instance ${instanceId} up for ${(accSeconds / 1000).toFixed(2)} seconds; estimated cost $${accCost.toFixed(4)}`);
 				instance.price = accCost;
 				fleet.price += accCost;
 			});
