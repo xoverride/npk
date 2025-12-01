@@ -49,7 +49,7 @@
                       </span>
                       <br>
                       Hashcat: {{ node['latest'].progress | number:2 }}% |
-                      Time: {{ ((now() - data.base.effectiveStartTime) / data.base.durationSeconds) * 100 | number:2 }}% |
+                      Time: {{ ((node.last - node.first) / data.base.durationSeconds) * 100 | number:2 }}% |
                       Price: {{ (data.base.totalPrice / data.base.targetPrice) * 100 | number:2 }}%
                     </small>
                     </div>
