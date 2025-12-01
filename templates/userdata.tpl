@@ -6,16 +6,16 @@ cd /root/
 PERF_LOGGING_ENABLED=1
 
 # Performance logging setup
-if [ "$PERF_LOGGING_ENABLED" = "1" ]; then
-    START_TIME=$(date +%s%3N)
+if [ "$$PERF_LOGGING_ENABLED" = "1" ]; then
+    START_TIME=$$(date +%s%3N)
 
     log_perf() {
-        local task_name="$1"
-        local status="$2"
-        local current_time=$(date +%s%3N)
-        local elapsed=$((current_time - START_TIME))
-        local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")
-        echo "[PERF] $timestamp | $status | $task_name | ${elapsed}ms"
+        local task_name="$$1"
+        local status="$$2"
+        local current_time=$$(date +%s%3N)
+        local elapsed=$$((current_time - START_TIME))
+        local timestamp=$$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")
+        echo "[PERF] $$timestamp | $$status | $$task_name | $${elapsed}ms"
     }
 
     log_perf "Node Provisioning Start" "START"
