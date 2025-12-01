@@ -9,6 +9,20 @@ var aws = require('aws-sdk');
 const { spawn } = require('child_process');
 var apiClientFactory = require('aws-api-gateway-client').default;
 
+// Performance logging flag - set to 1 to enable, 0 to disable
+const PERF_LOGGING_ENABLED = process.env.PERF_LOGGING_ENABLED === '1' || process.env.PERF_LOGGING_ENABLED === undefined;
+const START_TIME = Date.now();
+
+function logPerf(taskName, status) {
+	if (!PERF_LOGGING_ENABLED) return;
+	const currentTime = Date.now();
+	const elapsed = currentTime - START_TIME;
+	const timestamp = new Date().toISOString();
+	console.log(`[PERF] ${timestamp} | ${status} | ${taskName} | ${elapsed}ms`);
+}
+
+logPerf("Hashcat Wrapper Start", "START");
+
 var region = process.env.REGION;
 var primaryRegion = process.env.USERDATAREGION;
 var keyspace = process.env.KEYSPACE || 1;
@@ -42,6 +56,7 @@ var credFailureCount = 0;
 
 var getCredentials = function() {
 	return new Promise((success, failure) => {
+		logPerf("AWS Credentials Retrieval", "START");
 		aws.config.getCredentials(function(err) {
 			if (err) {
 				credFailureCount++;
@@ -51,6 +66,7 @@ var getCredentials = function() {
 					console.log("Retrying");
 					return getCredentials();
 				} else {
+					logPerf("AWS Credentials Retrieval", "FAILED");
 					return Project.reject('Failure retrieving credentials.')
 				}
 			}
@@ -67,6 +83,7 @@ var getCredentials = function() {
 
 			setTimeout(getCredentials, 600);
 
+			logPerf("AWS Credentials Retrieval", "DONE");
 			return success(true);
 		});
 	});
@@ -128,6 +145,7 @@ function getHashcatParams(manifest) {
 
 function checkForRestore(params) {
 	return new Promise((success, failure) => {
+		logPerf("Restore File Check", "START");
 		// Use session_name (campaign_id-instance_number) not instance_id
 		// This allows new instances to resume work from old instances in same slot
 		// Note: Modern hashcat creates restore files in its installation directory
@@ -204,6 +222,7 @@ function checkForRestore(params) {
 					];
 
 					console.log("[RESUME-CHECK] Final restore params:", restoreParams);
+					logPerf("Restore File Check", "DONE");
 					return success(restoreParams);
 				});
 			} else {
@@ -211,12 +230,14 @@ function checkForRestore(params) {
 				console.log("[RESUME-CHECK] This is a fresh start");
 				console.log("[RESUME-CHECK] Will calculate keyspace and begin from start");
 				console.log("[RESUME-CHECK] ========================================");
+				logPerf("Restore File Check", "DONE");
 				return getKeyspace(params).then(success).catch(failure);
 			}
 		}).catch((err) => {
 			console.error("[RESUME-CHECK] ERROR: Failed to check for restore files:", err);
 			console.log("[RESUME-CHECK] FALLBACK: Proceeding with normal keyspace calculation");
 			console.log("[RESUME-CHECK] ========================================");
+			logPerf("Restore File Check", "FAILED");
 			// If there's an error, just proceed with normal keyspace calculation
 			return getKeyspace(params).then(success).catch(failure);
 		});
@@ -258,6 +279,7 @@ var readOutput = function(output) {
 
 function getKeyspace(params) {
 	return new Promise((success, failure) => {
+		logPerf("Keyspace Calculation", "START");
 		console.log("Determining keyspace...");
 
 		// replaces the hashfile with '--keyspace'
@@ -307,8 +329,10 @@ function getKeyspace(params) {
 					params.splice(keyspaceIndex, 0, limit);
 				}
 
+				logPerf("Keyspace Calculation", "DONE");
 				return success(params);
 			} else {
+				logPerf("Keyspace Calculation", "FAILED");
 				return failure(output);
 			}
 		});
@@ -380,6 +404,7 @@ function backupRestoreFiles() {
 
 function runHashcat(params) {
 	return new Promise((success, failure) => {
+		logPerf("Hashcat Execution", "START");
 		console.log("\n\nEverything looks good. Starting hashcat...");
 		console.log("Hashcat command: /root/hashcat/hashcat.bin", params.join(' '));
 
@@ -483,6 +508,7 @@ function runHashcat(params) {
 
 			if (code > -1) {
 				console.log("\n\nCracking job exited successfully.\n");
+				logPerf("Hashcat Execution", "DONE");
 				// Clean up restore files on successful completion
 				cleanupRestoreFiles().then(() => {
 					return success(sendFinished(true));
@@ -497,6 +523,7 @@ function runHashcat(params) {
 				}
 				console.log("\n\n");
 
+				logPerf("Hashcat Execution", "FAILED");
 				// Backup restore files one final time on error
 				backupRestoreFiles().then(() => {
 					return success(sendFinished(false));
@@ -615,20 +642,24 @@ var sendFinished = function (completed) {
 
 getCredentials().then((data) => {
 	console.log('Credentials loaded');
+	logPerf("Hashcat Parameter Build", "START");
 	return getHashcatParams(manifest)
 }, (e) => {
 	console.log("Fatal error retrieving credentials.", e);
 	process.exit();
 }).then((params) => {
 	console.log('Hashcat parameters:', params)
+	logPerf("Hashcat Parameter Build", "DONE");
 	return runHashcat(params);
 }, (e) => {
 	console.log("Fatal error determining keyspace.", e);
 	process.exit();
-}).then((data) => {	
+}).then((data) => {
 	console.log("Final update delivered.");
+	logPerf("Hashcat Wrapper Complete", "DONE");
 	process.exit();
 }, (e) => {
 	console.log("Error delivering final update.", e);
+	logPerf("Hashcat Wrapper Complete", "FAILED");
 	process.exit();
 });

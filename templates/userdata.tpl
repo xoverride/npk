@@ -2,8 +2,30 @@
 
 cd /root/
 
+# Performance logging flag - set to 1 to enable, 0 to disable
+PERF_LOGGING_ENABLED=1
+
+# Performance logging setup
+if [ "$PERF_LOGGING_ENABLED" = "1" ]; then
+    START_TIME=$(date +%s%3N)
+
+    log_perf() {
+        local task_name="$1"
+        local status="$2"
+        local current_time=$(date +%s%3N)
+        local elapsed=$((current_time - START_TIME))
+        local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")
+        echo "[PERF] $timestamp | $status | $task_name | ${elapsed}ms"
+    }
+
+    log_perf "Node Provisioning Start" "START"
+else
+    log_perf() { :; }  # No-op function when disabled
+fi
+
 echo {{APIGATEWAY}} > /root/apigateway
 
+log_perf "Environment Setup" "START"
 export APIGATEWAY=$(cat /root/apigateway)
 export USERDATA=${userdata}
 export USERDATAREGION=${userdataRegion}
@@ -13,6 +35,7 @@ export REGION=`wget "--header=X-aws-ec2-metadata-token: $TOKEN" -qO- http://169.
 aws ec2 describe-tags --region $REGION --filter "Name=resource-id,Values=$INSTANCEID" --output=text | sed -r 's/TAGS\t(.*)\t.*\t.*\t(.*)/\1="\2"/' | sed -r 's/aws:ec2spot:fleet-request-id/SpotFleet/' > ec2-tags
 
 . ec2-tags
+log_perf "Environment Setup" "DONE"
 
 # This is required for the wrapper to get anything done.
 export ManifestPath=$ManifestPath
@@ -23,6 +46,7 @@ export BUCKETREGION=${userdataRegion}
 
 echo "Using dictionary bucket $BUCKET";
 
+log_perf "Driver and Package Installation" "START"
 # AMD drivers are only available on AL2, which needs EPEL for 7zip
 if [[ `lspci | grep AMD | wc -l` -gt 0 ]]; then
 	aws s3 cp s3://$BUCKET/components-v3/epel.rpm .
@@ -35,9 +59,11 @@ else
 fi
 
 yum install -y p7zip p7zip-plugins
+log_perf "Driver and Package Installation" "DONE"
 
 mkdir /potfiles
 
+log_perf "Device Format and Mount" "START"
 # format & mount /dev/xvdb
 if [[ -e /dev/xvdb ]]; then
 	echo "Using base device /dev/xvdb"
@@ -54,10 +80,14 @@ else
 	mkdir /nvme1n1/npk-wordlist
 	ln -s /nvme1n1/npk-wordlist /root/npk-wordlist
 fi;
+log_perf "Device Format and Mount" "DONE"
 
+log_perf "S3 Component Download (compute-node, manifest)" "START"
 aws s3 cp s3://$BUCKET/components-v3/compute-node.7z .
 aws s3 cp s3://$USERDATA/$ManifestPath/manifest.json .
+log_perf "S3 Component Download (compute-node, manifest)" "DONE"
 
+log_perf "NVM and NodeJS Installation" "START"
 # Install nvm
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | /bin/bash
 
@@ -67,17 +97,23 @@ mv /.nvm /root/
 
 # Install NodeJS v17 for AL2 compatibility
 nvm install 17
+log_perf "NVM and NodeJS Installation" "DONE"
 
+log_perf "Hashes File Download" "START"
 # Retrieve the hashes file
 wget -O hashes.txt "$(jq -r '.hashFileUrl' manifest.json)"
+log_perf "Hashes File Download" "DONE"
 
 # Make the dirs
 mkdir npk-rules
 
+log_perf "Dictionary and Rules Download" "START"
 # Get all manifest components
 jq -r '.dictionaryFile' manifest.json | xargs -L1 -I'{}' aws --region $BUCKETREGION s3 cp s3://$BUCKET/{} ./npk-wordlist/
 jq -r '.rulesFiles[]' manifest.json | xargs -L1 -I'{}' aws --region $BUCKETREGION s3 cp s3://$BUCKET/{} ./npk-rules/
+log_perf "Dictionary and Rules Download" "DONE"
 
+log_perf "File Decompression" "START"
 # Unzip them
 # 7z x ./npk-wordlist/* -o./npk-wordlist/
 # 7z x ./npk-rules/* -o./npk-rules/
@@ -93,6 +129,7 @@ ls -alh ./npk-rules/
 # Delete the originals
 jq -r '.dictionaryFile' manifest.json | xargs -L1 -I'{}' rm ./npk-{}
 jq -r '.rulesFiles[]' manifest.json | xargs -L1 -I'{}' rm -f ./npk-{}
+log_perf "File Decompression" "DONE"
 
 # Link the output file to potfiles
 ln -s /var/log/cloud-init-output.log /potfiles/$${INSTANCEID}-output.log
@@ -112,6 +149,7 @@ chmod +x /root/monitor_instance_action.sh
 
 cat /root/monitor_instance_action.sh
 
+log_perf "Crontab Setup" "START"
 # Create the crontab to sync s3
 # NOTE: Potfiles still use INSTANCEID (each physical instance has separate output)
 # But restore files use SESSIONPATTERN (logical slot, transferable between instances)
@@ -120,7 +158,9 @@ echo "* * * * * root /usr/local/bin/aws --region $USERDATAREGION s3 sync /potfil
 echo "* * * * * root /usr/local/bin/aws --region $USERDATAREGION s3 sync s3://$USERDATA/$ManifestPath/restore/hashcat/ /root/hashcat/ --include \"$${SESSIONPATTERN}.restore\" --include \"$${SESSIONPATTERN}.restore.pos\"" >> /etc/crontab
 echo "* * * * * root /usr/local/bin/aws --region $USERDATAREGION s3 sync /root/hashcat/ s3://$USERDATA/$ManifestPath/restore/hashcat/ --exclude \"*\" --include \"*.restore\" --include \"*.restore.pos\"" >> /etc/crontab
 echo "* * * * * root /root/monitor_instance_action.sh" >> /etc/crontab
+log_perf "Crontab Setup" "DONE"
 
+log_perf "Fleet Discovery and Session Creation" "START"
 aws ec2 describe-spot-fleet-instances --region $REGION --spot-fleet-request-id $SpotFleet | jq '.ActiveInstances[].InstanceId' | sort > fleet_instances
 export INSTANCECOUNT=$(cat fleet_instances | wc -l)
 export INSTANCENUMBER=$(cat fleet_instances | grep -nr $INSTANCEID - | cut -d':' -f1)
@@ -137,7 +177,9 @@ echo "[SESSION] Campaign ID: $${CAMPAIGNID}"
 echo "[SESSION] Instance ID: $${INSTANCEID} (physical instance)"
 echo "[SESSION] Instance Number: $${INSTANCENUMBER} (logical slot)"
 echo "[SESSION] Session Pattern: $${SESSIONPATTERN} (restore files)"
+log_perf "Fleet Discovery and Session Creation" "DONE"
 
+log_perf "Hashcat Binary Download" "START"
 if [[ `lspci | grep AMD | wc -l` -gt 0 ]]; then
 	# Need to compile Hashcat for AL2's old GLIBC
 	aws s3 cp s3://$BUCKET/components-v3/hashcat.al2.7z .
@@ -149,10 +191,13 @@ else
 	aws s3 cp s3://$BUCKET/components-v3/hashcat.arm64.7z .
 	aws s3 cp s3://$BUCKET/components-v3/maskprocessor.arm64.7z .
 fi
+log_perf "Hashcat Binary Download" "DONE"
 
+log_perf "Archive Extraction (hashcat, maskprocessor, compute-node)" "START"
 7z x hashcat*.7z && mv hashcat-*/ hashcat
 7z x maskprocessor*.7z && mv maskprocessor-*/ maskprocessor
 7z x compute-node.7z
+log_perf "Archive Extraction (hashcat, maskprocessor, compute-node)" "DONE"
 
 # Put the envvars in a useful place, in case debugging is needed.
 echo "export APIGATEWAY=$APIGATEWAY" >> envvars
@@ -170,6 +215,7 @@ echo "export CAMPAIGNID=$CAMPAIGNID" >> envvars
 echo "export SESSIONPATTERN=$SESSIONPATTERN" >> envvars
 chmod +x envvars
 
+log_perf "Restore Files Check and Download" "START"
 # Download existing restore files if they exist (for resume capability)
 # IMPORTANT: We look for SESSIONPATTERN files, not INSTANCEID files!
 # This allows new instances to resume work from old instances in same slot
@@ -206,7 +252,9 @@ else
 fi
 
 echo "========================================"
+log_perf "Restore Files Check and Download" "DONE"
 
+log_perf "Maskprocessor Rule Generation" "START"
 # If we have a mask specified for a non-mask attack type, generate a rule file from the mask:
 if [[ "$(jq -r '.attackType' manifest.json)" != "3" && "$(jq -r '.mask' manifest.json)" != "null" ]]; then
 	MASK=$(jq -r '.mask' manifest.json | sed 's/?/ $?/g')
@@ -221,14 +269,22 @@ if [[ "$(jq -r '.attackType' manifest.json)" != "3" && "$(jq -r '.mask' manifest
 		echo "Mask rule created with $(cat /root/npk-rules/npk-maskprocessor.rule | wc -l) entries"
 	fi
 fi
+log_perf "Maskprocessor Rule Generation" "DONE"
 
+log_perf "Hashcat Wrapper Execution" "START"
 # Use this for normal operations
 node compute-node/hashcat_wrapper.js
 echo "[*] Hashcat wrapper finished with status code $?"
+log_perf "Hashcat Wrapper Execution" "DONE"
+
+log_perf "Final S3 Sync" "START"
 # aws s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/
 aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --include "*$${INSTANCEID}*" --include "*benchmark-results*" --include "all_cracked_hashes.txt"
 # Sync restore files one final time before shutdown
 aws --region $USERDATAREGION s3 sync /root/hashcat/ s3://$USERDATA/$ManifestPath/restore/hashcat/ --exclude "*" --include "*.restore" --include "*.restore.pos"
+log_perf "Final S3 Sync" "DONE"
+
+log_perf "Node Complete" "DONE"
 sleep 30
 
 if [[ ! -f /root/nodeath ]]; then
