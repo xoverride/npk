@@ -257,11 +257,21 @@ exports.main = async function(event, context, callback) {
 				// Set record details based on event type.
 				switch (historyRecord.EventInformation.EventSubType) {
 					case "launched":
-						fleet.instances[instanceId].history.startTime = new Date(historyRecord.Timestamp).getTime() / 1000;
+						const launchTimeMs = new Date(historyRecord.Timestamp).getTime();
+						fleet.instances[instanceId].history.startTime = launchTimeMs / 1000;
+						console.log(`[DEBUG-PRICE] Instance ${instanceId} launched:`);
+						console.log(`[DEBUG-PRICE]   Raw Timestamp: ${historyRecord.Timestamp}`);
+						console.log(`[DEBUG-PRICE]   Converted to ms: ${launchTimeMs}`);
+						console.log(`[DEBUG-PRICE]   Stored as seconds: ${fleet.instances[instanceId].history.startTime}`);
 					break;
 
 					case "terminated":
-						fleet.instances[instanceId].history.endTime = new Date(historyRecord.Timestamp).getTime() / 1000;
+						const terminateTimeMs = new Date(historyRecord.Timestamp).getTime();
+						fleet.instances[instanceId].history.endTime = terminateTimeMs / 1000;
+						console.log(`[DEBUG-PRICE] Instance ${instanceId} terminated:`);
+						console.log(`[DEBUG-PRICE]   Raw Timestamp: ${historyRecord.Timestamp}`);
+						console.log(`[DEBUG-PRICE]   Converted to ms: ${terminateTimeMs}`);
+						console.log(`[DEBUG-PRICE]   Stored as seconds: ${fleet.instances[instanceId].history.endTime}`);
 					break;
 				}
 
@@ -328,7 +338,7 @@ exports.main = async function(event, context, callback) {
 					badInstance = true;
 					return false;
 				}
-				
+
 				prices[new Date().getTime()] = prices[Object.keys(prices).slice(-1)];
 
 				const timestamps = Object.keys(prices).sort(function(a, b) { return a - b; });
@@ -341,6 +351,12 @@ exports.main = async function(event, context, callback) {
 					return false;
 				}
 
+				// DEBUG: Log raw times from database
+				console.log(`[DEBUG-PRICE] Instance ${instanceId}:`);
+				console.log(`[DEBUG-PRICE]   startTime (seconds from DB): ${instance.history.startTime}`);
+				console.log(`[DEBUG-PRICE]   endTime (seconds from DB): ${instance.history.endTime}`);
+				console.log(`[DEBUG-PRICE]   duration (seconds): ${instance.history.endTime - instance.history.startTime}`);
+
 				// Convert to milliseconds to match price timestamp format
 				let duration = (instance.history.endTime - instance.history.startTime) * 1000;
 
@@ -350,30 +366,62 @@ exports.main = async function(event, context, callback) {
 				// Convert to milliseconds to match price timestamp format
 				let tempStartTime = instance.history.startTime * 1000;
 
+				console.log(`[DEBUG-PRICE]   duration (milliseconds): ${duration}`);
+				console.log(`[DEBUG-PRICE]   tempStartTime (milliseconds): ${tempStartTime}`);
+				console.log(`[DEBUG-PRICE]   First price timestamp: ${timestamps[0]}`);
+				console.log(`[DEBUG-PRICE]   Last price timestamp: ${timestamps[timestamps.length - 1]}`);
+				console.log(`[DEBUG-PRICE]   Number of price points: ${timestamps.length}`);
+
 				// console.log("duration: " + duration);
+				let iterationCount = 0;
 				timestamps.forEach(function(e) {
 					// console.log("Checking against time: " + e)
 					if (e <= tempStartTime || accSeconds >= duration) {
 						return true;
 					}
 
+					iterationCount++;
 					// Price per millisecond (hourly rate / 3600000)
 					var ppms = prices[e] / 3600000;
 					var mseconds = e - tempStartTime;
 
-					if (accSeconds + mseconds > duration) {
-						mseconds -= (accSeconds + mseconds - duration);
+					// DEBUG: Log first few iterations
+					if (iterationCount <= 3) {
+						console.log(`[DEBUG-PRICE]   Iteration ${iterationCount}:`);
+						console.log(`[DEBUG-PRICE]     price timestamp e: ${e}`);
+						console.log(`[DEBUG-PRICE]     tempStartTime: ${tempStartTime}`);
+						console.log(`[DEBUG-PRICE]     mseconds (e - tempStartTime): ${mseconds}`);
+						console.log(`[DEBUG-PRICE]     hourly price: $${prices[e]}`);
+						console.log(`[DEBUG-PRICE]     ppms (price/3600000): ${ppms}`);
 					}
 
-					accCost += (mseconds * ppms);
+					if (accSeconds + mseconds > duration) {
+						const originalMseconds = mseconds;
+						mseconds -= (accSeconds + mseconds - duration);
+						if (iterationCount <= 3) {
+							console.log(`[DEBUG-PRICE]     mseconds capped from ${originalMseconds} to ${mseconds} (duration limit)`);
+						}
+					}
+
+					const costThisSegment = mseconds * ppms;
+					if (iterationCount <= 3) {
+						console.log(`[DEBUG-PRICE]     cost this segment: $${costThisSegment.toFixed(6)}`);
+					}
+
+					accCost += costThisSegment;
 					accSeconds += mseconds;
 
 					tempStartTime += mseconds;
 				});
 
 				console.log(`[*] Instance ${instanceId} up for ${(accSeconds / 1000).toFixed(2)} seconds; estimated cost $${accCost.toFixed(4)}`);
+				console.log(`[DEBUG-PRICE]   Total iterations: ${iterationCount}`);
+				console.log(`[DEBUG-PRICE]   Final accCost: $${accCost.toFixed(6)}`);
+				console.log(`[DEBUG-PRICE]   Final accSeconds: ${accSeconds} ms (${(accSeconds/1000).toFixed(2)} seconds)`);
+
 				instance.price = accCost;
 				fleet.price += accCost;
+				console.log(`[DEBUG-PRICE]   Fleet ${fleetId} running total: $${fleet.price.toFixed(6)}`);
 			});
 
 			// Skip the fleet if an instance has partially truncated history.
@@ -392,6 +440,14 @@ exports.main = async function(event, context, callback) {
 			const ec2 = new aws.EC2({region: fleet.region});
 			const fleetState = (/cancelled/.test(fleet.SpotFleetRequestState)) ? "STOPPING" : "RUNNING";
 
+			console.log(`[DEBUG-PRICE] ===== FINAL FLEET PRICE =====`);
+			console.log(`[DEBUG-PRICE] Fleet ${fleetId} - Total instances: ${Object.keys(fleet.instances).length}`);
+			console.log(`[DEBUG-PRICE] Fleet ${fleetId} - Final fleet.price: $${fleet.price.toFixed(6)}`);
+			console.log(`[DEBUG-PRICE] Fleet ${fleetId} - Writing to DB as 'currentFleetPrice': $${fleet.price}`);
+			console.log(`[DEBUG-PRICE] Fleet ${fleetId} - MaxCost tag: $${tags.MaxCost}`);
+			console.log(`[DEBUG-PRICE] Fleet ${fleetId} - campaign_max_price: $${settings.campaign_max_price}`);
+			console.log(`[DEBUG-PRICE] ==============================`);
+
 			promises.push(editCampaignViaRequestId(fleetId, {
 				active: true,
 				currentFleetPrice: fleet.price,  // Current fleet's cost only (not accumulated)
@@ -400,8 +456,10 @@ exports.main = async function(event, context, callback) {
 				status: fleetState
 			}).then((data) => {
 				console.log(`[+] Updated price of fleet ${fleetId}: $${fleet.price.toFixed(2)}`);
+				console.log(`[DEBUG-PRICE] Database update successful for fleet ${fleetId}`);
 			}, (e) => {
 				console.log(`[!] Failed attempting to update price for ${fleetId}`);
+				console.log(`[DEBUG-PRICE] Database update FAILED for fleet ${fleetId}: ${e}`);
 			}));
 
 			if (fleet.price > parseFloat(tags.MaxCost) || fleet.price > parseFloat(settings.campaign_max_price)) {
@@ -499,6 +557,11 @@ function editCampaign(entity, campaign, values) {
 
 function editCampaignViaRequestId(spotFleetRequestId, values) {
 	return new Promise((success, failure) => {
+		console.log(`[DEBUG-PRICE] editCampaignViaRequestId called for fleet: ${spotFleetRequestId}`);
+		if (values.currentFleetPrice !== undefined) {
+			console.log(`[DEBUG-PRICE]   Writing currentFleetPrice: $${values.currentFleetPrice}`);
+		}
+
 		db.query({
 			ExpressionAttributeValues: {
 				':s': {S: spotFleetRequestId}
@@ -512,11 +575,15 @@ function editCampaignViaRequestId(spotFleetRequestId, values) {
 			}
 
 			if (data.Items.length < 1) {
+				console.log(`[DEBUG-PRICE]   No campaign found for fleet ${spotFleetRequestId}`);
 				return success(null);
 			}
 
 			data = aws.DynamoDB.Converter.unmarshall(data.Items[0]);
 			console.log("[+] Found campaign " + data.keyid.split(':').slice(1));
+			console.log(`[DEBUG-PRICE]   Existing accumulatedPrice: $${data.accumulatedPrice || 0}`);
+			console.log(`[DEBUG-PRICE]   Existing price: $${data.price || 0}`);
+			console.log(`[DEBUG-PRICE]   Existing currentFleetPrice: $${data.currentFleetPrice || 0}`);
 
 
 		// Check if campaign was already completed before marking as interrupted
