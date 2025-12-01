@@ -179,21 +179,21 @@ echo "[RESUME-INIT] Campaign ID: $${CAMPAIGNID}"
 echo "[RESUME-INIT] Physical Instance ID: $${INSTANCEID}"
 echo "[RESUME-INIT] Logical Instance Number: $${INSTANCENUMBER}"
 echo "[RESUME-INIT] Session Pattern: $${SESSIONPATTERN} (looking for these restore files)"
-echo "[RESUME-INIT] S3 Path: s3://$USERDATA/$ManifestPath/restore/"
+echo "[RESUME-INIT] S3 Path: s3://$USERDATA/$ManifestPath/restore/hashcat/"
 echo "========================================"
 
 # Check if restore files exist before trying to download
-RESTORE_COUNT=$(/usr/local/bin/aws --region $USERDATAREGION s3 ls s3://$USERDATA/$ManifestPath/restore/ | grep "$${SESSIONPATTERN}" | wc -l)
+RESTORE_COUNT=$(/usr/local/bin/aws --region $USERDATAREGION s3 ls s3://$USERDATA/$ManifestPath/restore/hashcat/ | grep "$${SESSIONPATTERN}" | wc -l)
 
 if [ "$RESTORE_COUNT" -gt 0 ]; then
     echo "[RESUME-INIT] Found $RESTORE_COUNT restore files for session $${SESSIONPATTERN}"
     echo "[RESUME-INIT] Downloading restore files..."
-    /usr/local/bin/aws --region $USERDATAREGION s3 sync s3://$USERDATA/$ManifestPath/restore/ /root/ --include "*$${SESSIONPATTERN}*"
+    /usr/local/bin/aws --region $USERDATAREGION s3 sync s3://$USERDATA/$ManifestPath/restore/hashcat/ /root/hashcat/ --include "$${SESSIONPATTERN}.restore" --include "$${SESSIONPATTERN}.restore.pos"
 
     # Verify download
-    if [ -f "/root/$${SESSIONPATTERN}.restore" ] && [ -f "/root/$${SESSIONPATTERN}.restore.pos" ]; then
+    if [ -f "/root/hashcat/$${SESSIONPATTERN}.restore" ] && [ -f "/root/hashcat/$${SESSIONPATTERN}.restore.pos" ]; then
         echo "[RESUME-INIT] ✓ Restore files downloaded successfully:"
-        ls -lh /root/$${SESSIONPATTERN}.restore*
+        ls -lh /root/hashcat/$${SESSIONPATTERN}.restore*
         echo "[RESUME-INIT] This instance will resume work from previous instance in slot $${INSTANCENUMBER}"
         echo "[RESUME-INIT] Hashcat will resume from checkpoint"
     else
@@ -228,7 +228,7 @@ echo "[*] Hashcat wrapper finished with status code $?"
 # aws s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/
 aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --include "*$${INSTANCEID}*" --include "*benchmark-results*" --include "all_cracked_hashes.txt"
 # Sync restore files one final time before shutdown
-aws --region $USERDATAREGION s3 sync /root/ s3://$USERDATA/$ManifestPath/restore/ --include "*.restore" --include "*.restore.pos"
+aws --region $USERDATAREGION s3 sync /root/hashcat/ s3://$USERDATA/$ManifestPath/restore/hashcat/ --exclude "*" --include "*.restore" --include "*.restore.pos"
 sleep 30
 
 if [[ ! -f /root/nodeath ]]; then
