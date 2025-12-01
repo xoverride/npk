@@ -1847,7 +1847,11 @@ angular
           campaigns[e].base.totalPrice = accumulatedPrice + currentFleetPrice;
 
           // Use originalStartTime for time calculations (handles multiple resumes)
-          campaigns[e].base.effectiveStartTime = campaigns[e].base.originalStartTime || campaigns[e].base.startTime;
+          // Parse as integers since DynamoDB returns strings
+          campaigns[e].base.effectiveStartTime = parseInt(campaigns[e].base.originalStartTime || campaigns[e].base.startTime);
+          campaigns[e].base.durationSeconds = parseInt(campaigns[e].base.durationSeconds);
+          campaigns[e].base.startTime = parseInt(campaigns[e].base.startTime);
+          campaigns[e].base.targetPrice = parseFloat(campaigns[e].base.targetPrice);
 
           if (!Array.isArray(campaigns?.[e]?.base?.spotRequestHistory)) {
             return false;
