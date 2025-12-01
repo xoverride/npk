@@ -81,7 +81,7 @@
                   <br>
                   Order was comprised of {{ event.instanceCount }}x {{ event.instanceType }} for {{ event.durationSeconds / 3600 }} hours.
                   <br>
-                  Campaign spent {{ event.price | currency:'$' }} of {{ event.targetPrice | currency:'$' }} allotted.
+                  Campaign spent {{ ((event.accumulatedPrice || 0) * 1 + (event.hasOwnProperty('currentFleetPrice') ? (event.currentFleetPrice || 0) : (event.price || 0)) * 1) | currency:'$' }} of {{ event.targetPrice | currency:'$' }} allotted.
                 </td>
               </tr>
               <tr ng-if="event.eventType == 'NodeFinished' && event.status == 'ERROR'">

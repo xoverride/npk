@@ -416,7 +416,7 @@
                         <small>x{{ campaign.instanceCount }}</small>
                       </td>
                       <td><small>{{ campaign.durationSeconds / 3600 }} Hours</small></td>
-                      <td><small>${{ campaign.price | number:2 }}</small></td>
+                      <td><small>${{ (((campaign.accumulatedPrice || 0) * 1 + (campaign.hasOwnProperty('currentFleetPrice') ? (campaign.currentFleetPrice || 0) : (campaign.price || 0)) * 1) | number:2) }}</small></td>
                       <td>
                           <small ng-if="!!!campaign.interrupted">
                             {{ campaign.status }}
