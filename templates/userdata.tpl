@@ -279,7 +279,7 @@ log_perf "Final S3 Sync" "START"
 # aws s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/
 aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --include "*$${INSTANCEID}*" --include "*benchmark-results*" --include "all_cracked_hashes.txt"
 # Sync restore files one final time before shutdown
-aws --region $USERDATAREGION s3 sync /root/hashcat/ s3://$USERDATA/$ManifestPath/restore/hashcat/ --exclude "*" --include "*.restore" --include "*.restore.pos"
+aws --region $USERDATAREGION s3 sync /root/hashcat/ s3://$USERDATA/$ManifestPath/restore/ --exclude "*" --include "*.restore" --include "*.restore.pos"
 log_perf "Final S3 Sync" "DONE"
 
 log_perf "Node Complete" "DONE"
