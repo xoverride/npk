@@ -255,22 +255,21 @@ exports.main = async function(event, context, callback) {
 				}
 
 				// Set record details based on event type.
+				// NOTE: historyRecord.Timestamp is already in seconds (converted at line 818)
 				switch (historyRecord.EventInformation.EventSubType) {
 					case "launched":
-						const launchTimeMs = new Date(historyRecord.Timestamp).getTime();
-						fleet.instances[instanceId].history.startTime = launchTimeMs / 1000;
+						// Timestamp is already in seconds, use it directly
+						fleet.instances[instanceId].history.startTime = historyRecord.Timestamp;
 						console.log(`[DEBUG-PRICE] Instance ${instanceId} launched:`);
-						console.log(`[DEBUG-PRICE]   Raw Timestamp: ${historyRecord.Timestamp}`);
-						console.log(`[DEBUG-PRICE]   Converted to ms: ${launchTimeMs}`);
+						console.log(`[DEBUG-PRICE]   Raw Timestamp (seconds): ${historyRecord.Timestamp}`);
 						console.log(`[DEBUG-PRICE]   Stored as seconds: ${fleet.instances[instanceId].history.startTime}`);
 					break;
 
 					case "terminated":
-						const terminateTimeMs = new Date(historyRecord.Timestamp).getTime();
-						fleet.instances[instanceId].history.endTime = terminateTimeMs / 1000;
+						// Timestamp is already in seconds, use it directly
+						fleet.instances[instanceId].history.endTime = historyRecord.Timestamp;
 						console.log(`[DEBUG-PRICE] Instance ${instanceId} terminated:`);
-						console.log(`[DEBUG-PRICE]   Raw Timestamp: ${historyRecord.Timestamp}`);
-						console.log(`[DEBUG-PRICE]   Converted to ms: ${terminateTimeMs}`);
+						console.log(`[DEBUG-PRICE]   Raw Timestamp (seconds): ${historyRecord.Timestamp}`);
 						console.log(`[DEBUG-PRICE]   Stored as seconds: ${fleet.instances[instanceId].history.endTime}`);
 					break;
 				}
