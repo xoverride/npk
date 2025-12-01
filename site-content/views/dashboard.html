@@ -94,10 +94,13 @@
                         <td><small>{{ campaign.hashType }}</small></td>
                         <td>
                           {{ campaign.instanceType }}
-                          <small>x{{ campaign.instanceCount }}</small>
+                          <small ng-if="!campaign.resumeCount || campaign.resumeCount == 0">x{{ campaign.instanceCount }}</small>
+                          <small ng-if="campaign.resumeCount > 0" class="text-warning" title="Resumed {{ campaign.resumeCount }} times">
+                            x{{ campaign.instanceCount }} &#x21bb;{{ campaign.resumeCount }}
+                          </small>
                         </td>
                         <td><small>{{ campaign.durationSeconds / 3600 }} Hours</small></td>
-                        <td><small>${{ campaign.price | number:2 }}</small></td>
+                        <td><small>${{ ((parseFloat(campaign.accumulatedPrice || 0) + parseFloat(campaign.currentFleetPrice || campaign.price || 0)) | number:2) }}</small></td>
                         <td>
                           <small ng-if="!!!campaign.interrupted">
                             {{ campaign.status }}
@@ -180,9 +183,9 @@
                                     &nbsp;&nbsp;&nbsp;
                                     Spot Fulfillment Message: [ {{ campaigns[campaign._id].spotRequestStatus[nid].Status.Message.split(':').pop() }} ]
                                     <br/>
-                                    Hashcat: {{ node['latest'].progress | number:2 }}% | 
-                                    Time: {{ ((node.last - campaign.startTime) / campaign.durationSeconds) * 100 | number:2 }}% | 
-                                    Price: {{ (campaign.price / campaign.targetPrice) * 100 | number:2 }}%;
+                                    Hashcat: {{ node['latest'].progress | number:2 }}% |
+                                    Time: {{ ((now()/1000 - (campaign.originalStartTime || campaign.startTime)) / campaign.durationSeconds) * 100 | number:2 }}% |
+                                    Price: {{ ((parseFloat(campaign.accumulatedPrice || 0) + parseFloat(campaign.currentFleetPrice || campaign.price || 0)) / campaign.targetPrice) * 100 | number:2 }}%;
                                     {{ node['latest'].status }} [{{ node['latest'].recoveredHashes }} / {{ campaign.hashes }}]
                                   </small>
                                   </div>
@@ -204,6 +207,25 @@
                                     <br />
                                     ( Instance is acknowledged by AWS but still provisioning )
                                   </small>
+                                </div>
+                              </div>
+                            </div>
+
+                            <!-- Show instances from previous fleet attempts (terminated) -->
+                            <div ng-if="campaigns[campaign._id].previousFleets && campaigns[campaign._id].previousFleets.length > 0" class="mt-3 border-top border-warning pt-3">
+                              <h6 class="text-warning"><small>Previous Fleet Instances (Terminated):</small></h6>
+                              <div ng-repeat="fleet in campaigns[campaign._id].previousFleets">
+                                <div ng-repeat="(nid, node) in fleet.spotRequestStatus">
+                                  <div class="row">
+                                    <div class="col-lg-2" style="margin-top: 1px;">
+                                      <a class="badge badge-warning" ng-href="#/file-management/campaigns/{{ campaign._id.split(':')[2] }}/potfiles/{{ nid }}-output"><small>{{ nid }}</small></a>
+                                    </div>
+                                    <div class="col-lg-10 text-center" style="padding-top: 8px;">
+                                      <small class="ml-3 text-warning">
+                                        [Fleet #{{ fleet.attemptNumber }}] {{ node.State }} / {{ node.Status.Code }};&nbsp;&nbsp;&nbsp;[ {{ node.Status.Message }} ]
+                                      </small>
+                                    </div>
+                                  </div>
                                 </div>
                               </div>
                             </div>
@@ -255,10 +277,13 @@
                       <td><small>{{ campaign.hashType }}<small></td>
                       <td>
                         {{ campaign.instanceType }}
-                        <small>x{{ campaign.instanceCount }}</small>
+                        <small ng-if="!campaign.resumeCount || campaign.resumeCount == 0">x{{ campaign.instanceCount }}</small>
+                        <small ng-if="campaign.resumeCount > 0" class="text-warning" title="Resumed {{ campaign.resumeCount }} times">
+                          x{{ campaign.instanceCount }} &#x21bb;{{ campaign.resumeCount }}
+                        </small>
                       </td>
                       <td><small>{{ campaign.durationSeconds / 3600 }} Hours</small></td>
-                      <td><small>${{ campaign.price | number:2 }}</small></td>
+                      <td><small>${{ ((parseFloat(campaign.accumulatedPrice || 0) + parseFloat(campaign.currentFleetPrice || campaign.price || 0)) | number:2) }}</small></td>
                       <td>
                         <small ng-if="!!!campaign.interrupted">
                           {{ campaign.status }}

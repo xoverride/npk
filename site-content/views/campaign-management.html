@@ -39,9 +39,14 @@
                         <div class="progress-bar bg-dark progress-bar-striped" ng-class="{'progress-bar-animated': data.active}" role="progressbar" style="width: {{ (((data.base.startTime + data.base.durationSeconds) - node.last) / data.base.durationSeconds) * 100 }}%"></div>
                      </div>
                      <small class="text-white">
-                      Spot Status: [ {{ data.base.spotRequestStatus[nid].State }}; {{ data.base.spotRequestStatus[nid].Status.Code }} ]
-                      &nbsp;&nbsp;&nbsp;
-                      Spot Fulfillment Message: [ {{ data.base.spotRequestStatus[nid].Status.Message }} ]
+                      <span ng-if="data.base.spotRequestStatus && data.base.spotRequestStatus[nid]">
+                        Spot Status: [ {{ data.base.spotRequestStatus[nid].State }}; {{ data.base.spotRequestStatus[nid].Status.Code }} ]
+                        &nbsp;&nbsp;&nbsp;
+                        Spot Fulfillment Message: [ {{ data.base.spotRequestStatus[nid].Status.Message }} ]
+                      </span>
+                      <span ng-if="!data.base.spotRequestStatus || !data.base.spotRequestStatus[nid]" class="text-muted">
+                        Spot Status: [ No current fleet data ]
+                      </span>
                       <br>
                       Hashcat: {{ node['latest'].progress | number:2 }}% |
                       Time: {{ ((now()/1000 - data.base.effectiveStartTime) / data.base.durationSeconds) * 100 | number:2 }}% |
