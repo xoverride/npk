@@ -100,7 +100,7 @@
                           </small>
                         </td>
                         <td><small>{{ campaign.durationSeconds / 3600 }} Hours</small></td>
-                        <td><small>${{ (((campaign.accumulatedPrice || 0) * 1 + (campaign.currentFleetPrice || campaign.price || 0) * 1) | number:2) }}</small></td>
+                        <td><small>${{ (((campaign.accumulatedPrice || 0) * 1 + (campaign.hasOwnProperty('currentFleetPrice') ? (campaign.currentFleetPrice || 0) : (campaign.price || 0)) * 1) | number:2) }}</small></td>
                         <td>
                           <small ng-if="!!!campaign.interrupted">
                             {{ campaign.status }}
@@ -185,7 +185,7 @@
                                     <br/>
                                     Hashcat: {{ node['latest'].progress | number:2 }}% |
                                     Time: {{ ((now() - (campaign.originalStartTime || campaign.startTime)) / campaign.durationSeconds) * 100 | number:2 }}% |
-                                    Price: {{ (((campaign.accumulatedPrice || 0) * 1 + (campaign.currentFleetPrice || campaign.price || 0) * 1) / campaign.targetPrice) * 100 | number:2 }}%;
+                                    Price: {{ (((campaign.accumulatedPrice || 0) * 1 + (campaign.hasOwnProperty('currentFleetPrice') ? (campaign.currentFleetPrice || 0) : (campaign.price || 0)) * 1) / campaign.targetPrice) * 100 | number:2 }}%;
                                     {{ node['latest'].status }} [{{ node['latest'].recoveredHashes }} / {{ campaign.hashes }}]
                                   </small>
                                   </div>
@@ -283,7 +283,7 @@
                         </small>
                       </td>
                       <td><small>{{ campaign.durationSeconds / 3600 }} Hours</small></td>
-                      <td><small>${{ (((campaign.accumulatedPrice || 0) * 1 + (campaign.currentFleetPrice || campaign.price || 0) * 1) | number:2) }}</small></td>
+                      <td><small>${{ (((campaign.accumulatedPrice || 0) * 1 + (campaign.hasOwnProperty('currentFleetPrice') ? (campaign.currentFleetPrice || 0) : (campaign.price || 0)) * 1) | number:2) }}</small></td>
                       <td>
                         <small ng-if="!!!campaign.interrupted">
                           {{ campaign.status }}

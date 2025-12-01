@@ -1842,8 +1842,12 @@ angular
           campaigns[e].base = data[e];
 
           // Calculate total price across all fleet attempts (for resumed campaigns)
-          const accumulatedPrice = parseFloat(campaigns[e].base.accumulatedPrice || 0);
-          const currentFleetPrice = parseFloat(campaigns[e].base.currentFleetPrice || campaigns[e].base.price || 0);
+          const accumulatedPrice = parseFloat(campaigns[e].base.accumulatedPrice) || 0;
+          // Fix: Check if currentFleetPrice property exists to avoid treating 0 as falsy
+          // parseFloat first, then default to 0 if NaN (handles null/undefined/non-numeric)
+          const currentFleetPrice = campaigns[e].base.hasOwnProperty('currentFleetPrice')
+            ? (parseFloat(campaigns[e].base.currentFleetPrice) || 0)
+            : (parseFloat(campaigns[e].base.price) || 0);
           campaigns[e].base.totalPrice = accumulatedPrice + currentFleetPrice;
 
           // Use originalStartTime for time calculations (handles multiple resumes)

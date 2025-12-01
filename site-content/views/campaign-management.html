@@ -151,7 +151,7 @@
                   <h5 class="text-white"><small>Region:</small> {{ manifest.region }}</h5><br/><br/>
                   <h4 class="text-white"><small>Actual Price:</small> ${{ data.base.totalPrice | number:2 }}</h4>
                   <small ng-if="data.base.accumulatedPrice > 0" class="text-warning">
-                    (Accumulated: ${{ data.base.accumulatedPrice | number:2 }} + Current: ${{ (data.base.currentFleetPrice || data.base.price) | number:2 }})
+                    (Accumulated: ${{ data.base.accumulatedPrice | number:2 }} + Current: ${{ (data.base.hasOwnProperty('currentFleetPrice') ? (data.base.currentFleetPrice || 0) : (data.base.price || 0)) | number:2 }})
                   </small>
                 </div>
               </div>
