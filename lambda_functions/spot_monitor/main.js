@@ -257,11 +257,11 @@ exports.main = async function(event, context, callback) {
 				// Set record details based on event type.
 				switch (historyRecord.EventInformation.EventSubType) {
 					case "launched":
-						fleet.instances[instanceId].history.startTime = new Date(historyRecord.Timestamp).getTime();
+						fleet.instances[instanceId].history.startTime = new Date(historyRecord.Timestamp).getTime() / 1000;
 					break;
 
 					case "terminated":
-						fleet.instances[instanceId].history.endTime = new Date(historyRecord.Timestamp).getTime();
+						fleet.instances[instanceId].history.endTime = new Date(historyRecord.Timestamp).getTime() / 1000;
 					break;
 				}
 
