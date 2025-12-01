@@ -213,45 +213,6 @@ echo "export CAMPAIGNID=$CAMPAIGNID" >> envvars
 echo "export SESSIONPATTERN=$SESSIONPATTERN" >> envvars
 chmod +x envvars
 
-log_perf "Restore Files Check and Download" "START"
-# Download existing restore files if they exist (for resume capability)
-# IMPORTANT: We look for SESSIONPATTERN files, not INSTANCEID files!
-# This allows new instances to resume work from old instances in same slot
-echo "========================================"
-echo "[RESUME-INIT] Checking for restore files"
-echo "[RESUME-INIT] Campaign ID: $${CAMPAIGNID}"
-echo "[RESUME-INIT] Physical Instance ID: $${INSTANCEID}"
-echo "[RESUME-INIT] Logical Instance Number: $${INSTANCENUMBER}"
-echo "[RESUME-INIT] Session Pattern: $${SESSIONPATTERN} (looking for these restore files)"
-echo "[RESUME-INIT] S3 Path: s3://$USERDATA/$ManifestPath/restore/hashcat/"
-echo "========================================"
-
-# Check if restore files exist before trying to download
-RESTORE_COUNT=$(/usr/local/bin/aws --region $USERDATAREGION s3 ls s3://$USERDATA/$ManifestPath/restore/hashcat/ | grep "$${SESSIONPATTERN}" | wc -l)
-
-if [ "$RESTORE_COUNT" -gt 0 ]; then
-    echo "[RESUME-INIT] Found $RESTORE_COUNT restore files for session $${SESSIONPATTERN}"
-    echo "[RESUME-INIT] Downloading restore files..."
-    /usr/local/bin/aws --region $USERDATAREGION s3 sync s3://$USERDATA/$ManifestPath/restore/hashcat/ /root/hashcat/ --include "$${SESSIONPATTERN}.restore" --include "$${SESSIONPATTERN}.restore.pos"
-
-    # Verify download
-    if [ -f "/root/hashcat/$${SESSIONPATTERN}.restore" ] && [ -f "/root/hashcat/$${SESSIONPATTERN}.restore.pos" ]; then
-        echo "[RESUME-INIT] ✓ Restore files downloaded successfully:"
-        ls -lh /root/hashcat/$${SESSIONPATTERN}.restore*
-        echo "[RESUME-INIT] This instance will resume work from previous instance in slot $${INSTANCENUMBER}"
-        echo "[RESUME-INIT] Hashcat will resume from checkpoint"
-    else
-        echo "[RESUME-INIT] WARNING: Restore files download failed or incomplete"
-        ls -lh /root/*.restore* || echo "[RESUME-INIT] No restore files found locally"
-    fi
-else
-    echo "[RESUME-INIT] No restore files found for session $${SESSIONPATTERN}"
-    echo "[RESUME-INIT] This is a fresh start"
-fi
-
-echo "========================================"
-log_perf "Restore Files Check and Download" "DONE"
-
 log_perf "Maskprocessor Rule Generation" "START"
 # If we have a mask specified for a non-mask attack type, generate a rule file from the mask:
 if [[ "$(jq -r '.attackType' manifest.json)" != "3" && "$(jq -r '.mask' manifest.json)" != "null" ]]; then
