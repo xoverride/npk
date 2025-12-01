@@ -1813,6 +1813,11 @@ angular
       });
     });
 
+    // Add now() function for time percentage calculations
+    $scope.now = function() {
+      return Math.floor(new Date().getTime() / 1000);
+    };
+
     $scope.getTypeFromHash = function(hashId) {
       var type = false;
       Object.keys(pricingSvc.hashTypes).forEach(function(e) {
