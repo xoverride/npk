@@ -118,8 +118,8 @@
 						"test": "StringLike",
 						"variable": "s3:prefix",
 						"values": [
-							"*/campaigns/*/potfiles/",
-							"*/campaigns/*/restore/"
+							"*/campaigns/*/potfiles/*",
+							"*/campaigns/*/restore/*"
 						]
 					}
 				}, {
