@@ -56,7 +56,6 @@ var credFailureCount = 0;
 
 var getCredentials = function() {
 	return new Promise((success, failure) => {
-		logPerf("AWS Credentials Retrieval", "START");
 		aws.config.getCredentials(function(err) {
 			if (err) {
 				credFailureCount++;
@@ -83,7 +82,6 @@ var getCredentials = function() {
 
 			setTimeout(getCredentials, 600);
 
-			logPerf("AWS Credentials Retrieval", "DONE");
 			return success(true);
 		});
 	});
