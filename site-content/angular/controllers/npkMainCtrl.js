@@ -547,7 +547,7 @@ angular
       };
 
       $scope.now = function() {
-        return (new Date().getTime() / 1000).toFixed(0);
+        return Math.floor(new Date().getTime() / 1000);
       };
 
       $scope.objLength = function(what) {
