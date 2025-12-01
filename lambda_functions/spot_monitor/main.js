@@ -527,7 +527,7 @@ function editCampaignViaRequestId(spotFleetRequestId, values) {
 			const alreadyCompleted = (
 				data.progress === 100 ||
 				data.status === 'COMPLETED' ||
-				(data.nodes && Object.values(data.nodes).every(n => n.status === 'Completed'))
+				(data.nodes && Object.values(data.nodes).every(n => n.status === 'COMPLETED'))
 			);
 
 			console.log(`[COMPLETION-CHECK]   alreadyCompleted: ${alreadyCompleted}`);
