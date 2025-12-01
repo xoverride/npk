@@ -155,8 +155,6 @@ log_perf "Crontab Setup" "START"
 # But restore files use SESSIONPATTERN (logical slot, transferable between instances)
 echo "* * * * * root /usr/local/bin/aws --region $USERDATAREGION s3 sync s3://$USERDATA/$ManifestPath/potfiles/ /potfiles/ --exclude \"*$${INSTANCEID}*\" --exclude \"*benchmark-results*\"" >> /etc/crontab
 echo "* * * * * root /usr/local/bin/aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --include \"*$${INSTANCEID}*\" --include \"*benchmark-results*\"" >> /etc/crontab
-echo "* * * * * root /usr/local/bin/aws --region $USERDATAREGION s3 sync s3://$USERDATA/$ManifestPath/restore/hashcat/ /root/hashcat/ --include \"$${SESSIONPATTERN}.restore\" --include \"$${SESSIONPATTERN}.restore.pos\"" >> /etc/crontab
-echo "* * * * * root /usr/local/bin/aws --region $USERDATAREGION s3 sync /root/hashcat/ s3://$USERDATA/$ManifestPath/restore/hashcat/ --exclude \"*\" --include \"*.restore\" --include \"*.restore.pos\"" >> /etc/crontab
 echo "* * * * * root /root/monitor_instance_action.sh" >> /etc/crontab
 log_perf "Crontab Setup" "DONE"
 
