@@ -9,10 +9,10 @@ if [[ $UID -eq 0 ]]; then
 	return 1
 fi
 
-# install compiler and cmake3, aliased to cmake
+# install compiler, cmake3, and p7zip
 if [[ ! -f /usr/bin/cmake ]]; then
-	echo "[*] Installing CMake3, C++"
-	sudo yum install -y cmake3 gcc-c++ > /dev/null
+	echo "[*] Installing CMake3, C++, and p7zip"
+	sudo yum install -y cmake3 gcc-c++ p7zip p7zip-plugins > /dev/null
 	sudo ln -s /usr/bin/cmake3 /usr/bin/cmake
 fi
 
