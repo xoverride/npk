@@ -627,17 +627,20 @@ exports.main = async function(event, context, callback) {
 					fleetPrice: currentFleetPrice  // Cost of this specific fleet
 				};
 
-				// Archive history and status if they exist
+				// Marshall the simple fields first
+				const marshalledFleet = aws.DynamoDB.Converter.marshall(archivedFleet);
+
+				// Add already-marshalled history and status (avoid double-marshalling)
 				if (campaign.Items[0].spotRequestHistory) {
-					archivedFleet.spotRequestHistory = campaign.Items[0].spotRequestHistory;
+					marshalledFleet.spotRequestHistory = campaign.Items[0].spotRequestHistory;
 				}
 
 				if (campaign.Items[0].spotRequestStatus) {
-					archivedFleet.spotRequestStatus = campaign.Items[0].spotRequestStatus;
+					marshalledFleet.spotRequestStatus = campaign.Items[0].spotRequestStatus;
 				}
 
 				// Add this fleet to the previousFleets array
-				previousFleets.push({ M: aws.DynamoDB.Converter.marshall(archivedFleet) });
+				previousFleets.push({ M: marshalledFleet });
 
 				// Update accumulatedPrice with this fleet's cost
 				updateParams.accumulatedPrice = { N: (accumulatedPrice + currentFleetPrice).toString() };
