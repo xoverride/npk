@@ -198,7 +198,7 @@ exports.main = async function(event, context, callback) {
 
 		try {
 			// List restore files in S3 to determine if we can resume
-			const s3Path = `${entity}/campaigns/${campaignId}/restore/hashcat/`;
+			const s3Path = `${entity}/campaigns/${campaignId}/restore/`;
 			console.log(`[RESUME] Checking S3 for restore files at: s3://${variables.userdata_bucket}/${s3Path}`);
 
 			const restoreFiles = await s3.listObjectsV2({
