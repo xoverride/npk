@@ -269,6 +269,33 @@ exports.main = async function(event, context, callback) {
 			// Update manifest with adjusted instance count
 			manifest.instanceCount = resumeInstanceCount;
 
+			// Create slot mapping for resume: fleet position -> actual restore slot
+			// Example: Found [2, 3] -> mapping: {"1": 2, "2": 3}
+			const slotMapping = {};
+			const sortedSlots = restoreFileDetails
+				.map(d => d.instanceNumber)
+				.sort((a, b) => a - b);
+
+			sortedSlots.forEach((actualSlot, index) => {
+				slotMapping[(index + 1).toString()] = actualSlot;
+			});
+
+			console.log(`[RESUME] Slot mapping:`, JSON.stringify(slotMapping));
+
+			// Upload slot mapping to S3
+			try {
+				const mappingKey = `${entity}/campaigns/${campaignId}/resume/slot_mapping.json`;
+				await s3.putObject({
+					Bucket: variables.userdata_bucket,
+					Key: mappingKey,
+					Body: JSON.stringify(slotMapping),
+					ContentType: 'application/json'
+				}).promise();
+				console.log(`[RESUME] Uploaded slot mapping to S3`);
+			} catch (err) {
+				console.error("[RESUME] WARNING: Failed to upload slot mapping:", err.message);
+			}
+
 			console.log(`[RESUME] Resume metadata:`, JSON.stringify(resumeMetadata, null, 2));
 
 		} catch (listErr) {
