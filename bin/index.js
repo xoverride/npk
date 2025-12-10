@@ -574,18 +574,19 @@ async function buildAndUploadComputeNode(aws) {
 		console.log("[!] WARNING: Could not determine dictionary bucket name");
 		console.log("[!] Please upload compute-node.7z manually:");
 		console.log("    BUCKET=$(aws s3 ls | grep npk-dictionary | awk '{print $3}')");
-		console.log(`    aws s3 cp "${archivePath}" s3://$BUCKET/components-v3/compute-node.7z`);
+		console.log(`    aws s3 cp "${archivePath}" s3://$BUCKET/components-v3/compute-node.7z --checksum-algorithm CRC64NVME`);
 		return false;
 	}
 
-	// Upload to S3
+	// Upload to S3 with CRC64NVME checksum (AWS default)
 	console.log(`[*] Uploading to s3://${bucket}/components-v3/compute-node.7z...`);
 	try {
 		const fileContent = fs.readFileSync(archivePath);
 		await s3.putObject({
 			Bucket: bucket,
 			Key: 'components-v3/compute-node.7z',
-			Body: fileContent
+			Body: fileContent,
+			ChecksumAlgorithm: 'CRC64NVME'
 		}).promise();
 
 		console.log("[+] Successfully uploaded updated compute-node.7z");
@@ -606,7 +607,7 @@ async function buildAndUploadComputeNode(aws) {
 		console.log("[!] WARNING: Failed to upload compute-node.7z to S3");
 		console.log(`[!] Error: ${e.message}`);
 		console.log("[!] You may need to upload manually:");
-		console.log(`    aws s3 cp "${archivePath}" s3://${bucket}/components-v3/compute-node.7z`);
+		console.log(`    aws s3 cp "${archivePath}" s3://${bucket}/components-v3/compute-node.7z --checksum-algorithm CRC64NVME`);
 		return false;
 	} finally {
 		// Clean up temporary file
