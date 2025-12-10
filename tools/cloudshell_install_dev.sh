@@ -123,27 +123,36 @@ if [[ -d compute-node ]]; then
         fi
 
         if [[ -n "$BUCKET" ]]; then
-            # Compute local file MD5 hash
+            # Compute local file SHA256 checksum
+            # Using SHA256 instead of MD5 for better reliability and security
             echo "[*] Computing local file checksum..."
-            LOCAL_MD5=$(md5sum /aws/mde/npk/tools/components/compute-node.7z | awk '{print $1}')
+            LOCAL_SHA256=$(sha256sum /aws/mde/npk/tools/components/compute-node.7z | awk '{print $1}' | base64)
 
-            # Get S3 object ETag (MD5 hash) without downloading
+            # Get S3 object checksum without downloading
+            # S3 stores checksums as metadata when uploaded with --checksum-algorithm
+            # This works for both single-part and multipart uploads, and all encryption types
             echo "[*] Checking S3 object checksum..."
-            S3_ETAG=$(aws s3api head-object --bucket "$BUCKET" --key "components-v3/compute-node.7z" --query 'ETag' --output text 2>/dev/null | tr -d '"')
+            S3_SHA256=$(aws s3api head-object --bucket "$BUCKET" --key "components-v3/compute-node.7z" --query 'ChecksumSHA256' --output text 2>/dev/null)
 
             # Compare checksums
-            if [[ -n "$S3_ETAG" ]] && [[ "$LOCAL_MD5" == "$S3_ETAG" ]]; then
-                echo "[+] Local file matches S3 object (checksum: $LOCAL_MD5)"
+            if [[ -n "$S3_SHA256" ]] && [[ "$LOCAL_SHA256" == "$S3_SHA256" ]]; then
+                echo "[+] Local file matches S3 object (SHA256: ${LOCAL_SHA256:0:16}...)"
                 echo "[+] Skipping upload - compute-node.7z is already up to date"
+                SKIP_UPLOAD=true
             else
-                if [[ -n "$S3_ETAG" ]]; then
-                    echo "[*] Checksums differ (local: $LOCAL_MD5, S3: $S3_ETAG)"
+                if [[ -n "$S3_SHA256" ]]; then
+                    echo "[*] Checksums differ"
+                    echo "    Local:  ${LOCAL_SHA256:0:16}..."
+                    echo "    S3:     ${S3_SHA256:0:16}..."
                 else
-                    echo "[*] No existing S3 object found"
+                    echo "[*] No existing S3 object with checksum metadata found"
                 fi
+                SKIP_UPLOAD=false
+            fi
 
-                echo "[*] Uploading to s3://$BUCKET/components-v3/compute-node.7z..."
-                aws s3 cp /aws/mde/npk/tools/components/compute-node.7z s3://$BUCKET/components-v3/compute-node.7z
+            if [[ "$SKIP_UPLOAD" == "false" ]]; then
+                echo "[*] Uploading to s3://$BUCKET/components-v3/compute-node.7z with SHA256 checksum..."
+                aws s3 cp /aws/mde/npk/tools/components/compute-node.7z s3://$BUCKET/components-v3/compute-node.7z --checksum-algorithm SHA256
 
                 if [[ $? -eq 0 ]]; then
                     echo "[+] Successfully uploaded updated compute-node.7z"
@@ -154,7 +163,7 @@ if [[ -d compute-node ]]; then
                 else
                     echo "[!] WARNING: Failed to upload compute-node.7z to S3"
                     echo "[!] You may need to upload manually:"
-                    echo "    aws s3 cp /aws/mde/npk/tools/components/compute-node.7z s3://$BUCKET/components-v3/compute-node.7z"
+                    echo "    aws s3 cp /aws/mde/npk/tools/components/compute-node.7z s3://$BUCKET/components-v3/compute-node.7z --checksum-algorithm SHA256"
                 fi
             fi
         else
