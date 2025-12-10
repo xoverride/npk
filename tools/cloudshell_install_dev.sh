@@ -123,19 +123,39 @@ if [[ -d compute-node ]]; then
         fi
 
         if [[ -n "$BUCKET" ]]; then
-            echo "[*] Uploading to s3://$BUCKET/components-v3/compute-node.7z..."
-            aws s3 cp /aws/mde/npk/tools/components/compute-node.7z s3://$BUCKET/components-v3/compute-node.7z
+            # Compute local file MD5 hash
+            echo "[*] Computing local file checksum..."
+            LOCAL_MD5=$(md5sum /aws/mde/npk/tools/components/compute-node.7z | awk '{print $1}')
 
-            if [[ $? -eq 0 ]]; then
-                echo "[+] Successfully uploaded updated compute-node.7z"
-                echo "[+] New EC2 instances will now use the updated code with checkpoint/resume support"
+            # Get S3 object ETag (MD5 hash) without downloading
+            echo "[*] Checking S3 object checksum..."
+            S3_ETAG=$(aws s3api head-object --bucket "$BUCKET" --key "components-v3/compute-node.7z" --query 'ETag' --output text 2>/dev/null | tr -d '"')
 
-                # Verify upload
-                aws s3 ls s3://$BUCKET/components-v3/ | grep compute-node.7z
+            # Compare checksums
+            if [[ -n "$S3_ETAG" ]] && [[ "$LOCAL_MD5" == "$S3_ETAG" ]]; then
+                echo "[+] Local file matches S3 object (checksum: $LOCAL_MD5)"
+                echo "[+] Skipping upload - compute-node.7z is already up to date"
             else
-                echo "[!] WARNING: Failed to upload compute-node.7z to S3"
-                echo "[!] You may need to upload manually:"
-                echo "    aws s3 cp /aws/mde/npk/tools/components/compute-node.7z s3://$BUCKET/components-v3/compute-node.7z"
+                if [[ -n "$S3_ETAG" ]]; then
+                    echo "[*] Checksums differ (local: $LOCAL_MD5, S3: $S3_ETAG)"
+                else
+                    echo "[*] No existing S3 object found"
+                fi
+
+                echo "[*] Uploading to s3://$BUCKET/components-v3/compute-node.7z..."
+                aws s3 cp /aws/mde/npk/tools/components/compute-node.7z s3://$BUCKET/components-v3/compute-node.7z
+
+                if [[ $? -eq 0 ]]; then
+                    echo "[+] Successfully uploaded updated compute-node.7z"
+                    echo "[+] New EC2 instances will now use the updated code with checkpoint/resume support"
+
+                    # Verify upload
+                    aws s3 ls s3://$BUCKET/components-v3/ | grep compute-node.7z
+                else
+                    echo "[!] WARNING: Failed to upload compute-node.7z to S3"
+                    echo "[!] You may need to upload manually:"
+                    echo "    aws s3 cp /aws/mde/npk/tools/components/compute-node.7z s3://$BUCKET/components-v3/compute-node.7z"
+                fi
             fi
         else
             echo "[!] WARNING: Could not determine dictionary bucket name"
