@@ -53,6 +53,60 @@ console.log(`[SESSION] Session Name: ${session_name} (restore files)`);
 var apiClient = null;
 var credentialsReady = 0;
 var credFailureCount = 0;
+var isShuttingDown = false;
+var hashcatProcess = null;  // Store reference to hashcat child process
+
+// Handle SIGTERM gracefully - backup restore files immediately
+process.on('SIGTERM', async () => {
+	console.log('[SHUTDOWN] Received SIGTERM signal, backing up restore files...');
+	isShuttingDown = true;
+	try {
+		// Tell hashcat to create checkpoint before we backup
+		await triggerHashcatCheckpoint();
+		await backupRestoreFiles();
+		console.log('[SHUTDOWN] Restore files backed up successfully');
+	} catch (err) {
+		console.error('[SHUTDOWN] Failed to backup restore files:', err);
+	}
+	process.exit(0);
+});
+
+// Handle SIGINT (Ctrl+C) gracefully as well
+process.on('SIGINT', async () => {
+	console.log('[SHUTDOWN] Received SIGINT signal, backing up restore files...');
+	isShuttingDown = true;
+	try {
+		// Tell hashcat to create checkpoint before we backup
+		await triggerHashcatCheckpoint();
+		await backupRestoreFiles();
+		console.log('[SHUTDOWN] Restore files backed up successfully');
+	} catch (err) {
+		console.error('[SHUTDOWN] Failed to backup restore files:', err);
+	}
+	process.exit(0);
+});
+
+// Handle SIGUSR1 for spot interruption 2-minute warning
+// This gives us 2 full minutes to backup instead of just 30 seconds at SIGTERM
+process.on('SIGUSR1', async () => {
+	console.log('[SPOT-WARNING] ============================================');
+	console.log('[SPOT-WARNING] Received 2-minute spot interruption warning!');
+	console.log('[SPOT-WARNING] Backing up restore files immediately...');
+	console.log('[SPOT-WARNING] ============================================');
+	try {
+		// DON'T trigger checkpoint - hashcat auto-checkpoints periodically
+		// Triggering checkpoint with 'c' would cause hashcat to quit
+		// Instead, backup existing restore file and let hashcat continue working
+		// At SIGTERM (2 mins later), we'll trigger checkpoint for fresh backup
+		await backupRestoreFiles();
+		console.log('[SPOT-WARNING] Restore files backed up successfully');
+		console.log('[SPOT-WARNING] Hashcat will continue working until termination');
+		console.log('[SPOT-WARNING] Final checkpoint will be created at SIGTERM');
+	} catch (err) {
+		console.error('[SPOT-WARNING] Failed to backup restore files:', err);
+	}
+	// DON'T exit - continue running until SIGTERM
+});
 
 var getCredentials = function() {
 	return new Promise((success, failure) => {
@@ -337,6 +391,32 @@ function getKeyspace(params) {
 	});
 }
 
+function triggerHashcatCheckpoint() {
+	return new Promise((success) => {
+		if (!hashcatProcess || hashcatProcess.killed) {
+			console.log("[CHECKPOINT] Hashcat process not running, skipping checkpoint trigger");
+			return success(false);
+		}
+
+		try {
+			console.log("[CHECKPOINT] Sending 'c' to hashcat to trigger checkpoint save...");
+			// Send 'c' key to hashcat stdin to trigger checkpoint quit
+			// Hashcat will update restore file before quitting
+			hashcatProcess.stdin.write('c');
+
+			// Wait 3 seconds for hashcat to update restore file
+			// This gives hashcat time to write the checkpoint
+			setTimeout(() => {
+				console.log("[CHECKPOINT] Hashcat should have updated restore file");
+				success(true);
+			}, 3000);
+		} catch (err) {
+			console.error("[CHECKPOINT] Failed to send checkpoint signal to hashcat:", err);
+			success(false);
+		}
+	});
+}
+
 function backupRestoreFiles() {
 	return new Promise((success, failure) => {
 		// Note: Modern hashcat creates restore files in its installation directory
@@ -406,13 +486,15 @@ function runHashcat(params) {
 		console.log("\n\nEverything looks good. Starting hashcat...");
 		console.log("Hashcat command: /root/hashcat/hashcat.bin", params.join(' '));
 
-		const hashcat = spawn("/root/hashcat/hashcat.bin", params, {
+		hashcatProcess = spawn("/root/hashcat/hashcat.bin", params, {
 			name: 'xterm-color',
 			cols: 80,
 			rows: 30,
 			cwd: process.env.HOME,
 			env: process.env
 		});
+
+		const hashcat = hashcatProcess;  // Alias for backward compatibility
 
 		// Watch restore files for changes and backup when they change
 		// Note: Modern hashcat creates restore files in its installation directory
@@ -541,31 +623,39 @@ function cleanupRestoreFiles() {
 		const s3RestorePath = `${manifestpath}/restore/${session_name}.restore`;
 		const s3RestorePosPath = `${manifestpath}/restore/${session_name}.restore.pos`;
 
-		console.log("Cleaning up restore files...");
+		console.log("[CLEANUP] ========================================");
+		console.log("[CLEANUP] Hashcat job completed successfully");
+		console.log("[CLEANUP] Cleaning up restore files (no longer needed)");
+		console.log("[CLEANUP] ========================================");
 
 		// Delete local restore files (.pos file is optional)
 		try {
 			if (fs.existsSync(restoreFile)) {
 				fs.unlinkSync(restoreFile);
-				console.log("Deleted local restore file");
+				console.log("[CLEANUP] ✓ Deleted local restore file:", restoreFile);
 			}
 			if (fs.existsSync(restorePosFile)) {
 				fs.unlinkSync(restorePosFile);
-				console.log("Deleted local restore.pos file");
+				console.log("[CLEANUP] ✓ Deleted local restore.pos file:", restorePosFile);
 			}
 		} catch (err) {
-			console.log("Error deleting local restore files:", err);
+			console.log("[CLEANUP] Error deleting local restore files:", err);
 		}
 
 		// Delete S3 restore files (.pos file is optional)
+		console.log("[CLEANUP] Deleting restore files from S3...");
+		console.log("[CLEANUP] S3 bucket:", userdata_bucket);
+		console.log("[CLEANUP] S3 paths:", s3RestorePath, s3RestorePosPath);
 		Promise.all([
 			s3.deleteObject({ Bucket: userdata_bucket, Key: s3RestorePath }).promise().catch(() => {}),
 			s3.deleteObject({ Bucket: userdata_bucket, Key: s3RestorePosPath }).promise().catch(() => {})
 		]).then(() => {
-			console.log("Restore files cleaned up successfully.");
+			console.log("[CLEANUP] ✓ S3 restore files deleted successfully");
+			console.log("[CLEANUP] Job complete - all restore files removed");
+			console.log("[CLEANUP] ========================================");
 			success(true);
 		}).catch((err) => {
-			console.log("Error cleaning up S3 restore files:", err);
+			console.log("[CLEANUP] Error cleaning up S3 restore files:", err);
 			failure(err);
 		});
 	});

@@ -488,6 +488,140 @@ async function persistSettings(settings) {
 	console.log('[+] NPK settings saved to Sonnetry');
 }
 
+async function buildAndUploadComputeNode(aws) {
+	const util = require('util');
+	const execPromise = util.promisify(exec);
+
+	console.log("\n================================================================================");
+	console.log("[*] Building and uploading updated compute-node.7z with checkpoint/resume support");
+	console.log("================================================================================\n");
+
+	// Check if 7z is installed
+	try {
+		await execPromise('7z --help');
+	} catch (e) {
+		console.log("[!] WARNING: 7z is not installed. Cannot build compute-node.7z");
+		console.log("[!] Please install p7zip and run deployment again:");
+		console.log("    - macOS: brew install p7zip");
+		console.log("    - Linux: sudo yum install -y p7zip p7zip-plugins");
+		console.log("    - Ubuntu/Debian: sudo apt-get install -y p7zip-full");
+		return false;
+	}
+
+	// Check if compute-node directory exists
+	const computeNodePath = path.join(__dirname, '../tools/compute-node');
+	if (!fs.existsSync(computeNodePath)) {
+		console.log("[!] WARNING: compute-node directory not found at tools/compute-node/");
+		console.log("[!] Skipping component build");
+		return false;
+	}
+
+	console.log("[*] Building compute-node.7z from tools/compute-node/...");
+
+	// Install dependencies
+	try {
+		console.log("[*] Installing compute-node dependencies...");
+		await execPromise('npm install', { cwd: computeNodePath });
+	} catch (e) {
+		console.log("[-] Failed to install compute-node dependencies, but continuing...");
+	}
+
+	// Create components directory
+	const componentsPath = path.join(__dirname, '../tools/components');
+	if (!fs.existsSync(componentsPath)) {
+		fs.mkdirSync(componentsPath, { recursive: true });
+	}
+
+	// Build the archive
+	const archivePath = path.join(componentsPath, 'compute-node.7z');
+	try {
+		await execPromise(`7z a "${archivePath}" compute-node/`, { cwd: path.join(__dirname, '../tools') });
+		console.log("[+] compute-node.7z built successfully");
+	} catch (e) {
+		console.log("[!] WARNING: Failed to build compute-node.7z");
+		console.log("[!] Checkpoint/resume functionality may not work correctly");
+		return false;
+	}
+
+	// Get dictionary bucket name
+	let bucket = '';
+	const s3 = new aws.S3();
+
+	// Try reading from dictionaries.auto.tfvars
+	const tfvarsPath = path.join(__dirname, '../terraform/dictionaries.auto.tfvars');
+	if (fs.existsSync(tfvarsPath)) {
+		const tfvarsContent = fs.readFileSync(tfvarsPath, 'utf8');
+		const match = tfvarsContent.match(/dictionaryBucket\s*=\s*"([^"]+)"/);
+		if (match) {
+			bucket = match[1];
+		}
+	}
+
+	// Fallback: search for npk-dictionary bucket
+	if (!bucket) {
+		try {
+			const buckets = await s3.listBuckets().promise();
+			const dictionaryBucket = buckets.Buckets.find(b => b.Name.includes('npk-dictionary'));
+			if (dictionaryBucket) {
+				bucket = dictionaryBucket.Name;
+			}
+		} catch (e) {
+			console.log(`[-] Failed to list S3 buckets: ${e.message}`);
+		}
+	}
+
+	if (!bucket) {
+		console.log("[!] WARNING: Could not determine dictionary bucket name");
+		console.log("[!] Please upload compute-node.7z manually:");
+		console.log("    BUCKET=$(aws s3 ls | grep npk-dictionary | awk '{print $3}')");
+		console.log(`    aws s3 cp "${archivePath}" s3://$BUCKET/components-v3/compute-node.7z`);
+		return false;
+	}
+
+	// Upload to S3
+	console.log(`[*] Uploading to s3://${bucket}/components-v3/compute-node.7z...`);
+	try {
+		const fileContent = fs.readFileSync(archivePath);
+		await s3.putObject({
+			Bucket: bucket,
+			Key: 'components-v3/compute-node.7z',
+			Body: fileContent
+		}).promise();
+
+		console.log("[+] Successfully uploaded updated compute-node.7z");
+		console.log("[+] New EC2 instances will now use the updated code with checkpoint/resume support");
+
+		// Verify upload
+		const objects = await s3.listObjectsV2({
+			Bucket: bucket,
+			Prefix: 'components-v3/'
+		}).promise();
+
+		const uploaded = objects.Contents.find(obj => obj.Key === 'components-v3/compute-node.7z');
+		if (uploaded) {
+			console.log(`[+] Verified: compute-node.7z (${(uploaded.Size / 1024 / 1024).toFixed(2)} MB)`);
+		}
+
+	} catch (e) {
+		console.log("[!] WARNING: Failed to upload compute-node.7z to S3");
+		console.log(`[!] Error: ${e.message}`);
+		console.log("[!] You may need to upload manually:");
+		console.log(`    aws s3 cp "${archivePath}" s3://${bucket}/components-v3/compute-node.7z`);
+		return false;
+	} finally {
+		// Clean up temporary file
+		if (fs.existsSync(archivePath)) {
+			fs.unlinkSync(archivePath);
+		}
+	}
+
+	console.log("\n================================================================================");
+	console.log("[+] Component build and upload complete!");
+	console.log("================================================================================\n");
+
+	return true;
+}
+
 function showHelloBanner() {
 	console.log("***********************************************************");
 	console.log(" Hello friend! Thanks for using NPK!");
@@ -558,6 +692,18 @@ function showHelpBanner() {
 			}
 
 			await persistSettings(settings);
+
+			// Build and upload updated compute-node.7z AFTER terraform completes
+			// This ensures the upstream sync doesn't overwrite our local version
+			const uploadSuccess = await buildAndUploadComputeNode(sonnetry.aws);
+
+			if (!uploadSuccess) {
+				console.log("\n[!] CRITICAL ERROR: Failed to build and upload compute-node.7z");
+				console.log("[!] EC2 instances will NOT have checkpoint/resume support!");
+				console.log("[!] Please fix the issue and run deployment again.");
+				showHelpBanner();
+				process.exit(1);
+			}
 
 			console.log("\n[+] NPK successfully deployed. Happy hunting.");
 

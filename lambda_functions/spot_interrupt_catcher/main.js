@@ -99,6 +99,39 @@ exports.main = async function (event, context, callback) {
 			}
 		}).promise();
 
+		console.log(`[RESUME-PREP] Campaign ${campaignId} marked as resumable`);
+
+		// NEW: Trigger immediate restore file backup using SSM
+		// This gives us the full 2-minute window instead of just 30 seconds at SIGTERM
+		console.log(`[RESUME-PREP] Triggering immediate restore file backup via SSM...`);
+
+		try {
+			const ssm = new aws.SSM({ region: event.region });
+
+			const ssmCommand = await ssm.sendCommand({
+				DocumentName: 'AWS-RunShellScript',
+				InstanceIds: [instanceId],
+				Comment: `Spot interruption: backup restore files for campaign ${campaignId}`,
+				Parameters: {
+					commands: [
+						'# Send SIGUSR1 to hashcat_wrapper to trigger immediate backup',
+						'pkill -SIGUSR1 -f hashcat_wrapper.js',
+						'echo "[SPOT-WARNING] Sent SIGUSR1 signal to hashcat_wrapper for immediate backup"'
+					]
+				},
+				TimeoutSeconds: 30,
+				MaxConcurrency: '1',
+				MaxErrors: '0'
+			}).promise();
+
+			console.log(`[RESUME-PREP] SSM command sent successfully: ${ssmCommand.Command.CommandId}`);
+			console.log(`[RESUME-PREP] Instance has 2 minutes to backup restore files before termination`);
+		} catch (ssmErr) {
+			// Don't fail the lambda if SSM fails - SIGTERM handler will still catch it
+			console.error(`[RESUME-PREP] WARNING: Failed to send SSM command: ${ssmErr}`);
+			console.log(`[RESUME-PREP] Backup will still occur via SIGTERM handler (30s window)`);
+		}
+
 		console.log(`[RESUME-PREP] Campaign ${campaignId} marked as resumable - restore files should be in S3`);
 	} catch (e) {
 		console.log(`[!] Failed to mark instance as interrupted. ${e}`);

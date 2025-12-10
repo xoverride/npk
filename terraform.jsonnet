@@ -1110,7 +1110,7 @@ local regionKeys = std.objectFields(settings.regions);
 
 				    provisioner: {
 				    	"local-exec": {
-				        	command: "aws s3 sync s3://npk-dictionary-west-2-20181029005812750900000002 s3://${aws_s3_bucket.dictionary.id} --metadata-directive COPY --request-payer requester --source-region us-west-2 --region " + settings.primaryRegion,
+				        	command: "aws s3 sync s3://npk-dictionary-west-2-20181029005812750900000002 s3://${aws_s3_bucket.dictionary.id} --exclude 'components-v3/compute-node.7z' --metadata-directive COPY --request-payer requester --source-region us-west-2 --region " + settings.primaryRegion,
 					    }
 				    },
 
@@ -1120,7 +1120,7 @@ local regionKeys = std.objectFields(settings.regions);
 		},
 		output: {
 			aws_s3_sync_bucket_command: {
-				value: "aws s3 sync s3://npk-dictionary-west-2-20181029005812750900000002 s3://${aws_s3_bucket.dictionary.id} --metadata-directive COPY --request-payer requester --source-region us-west-2 --region " + settings.primaryRegion
+				value: "aws s3 sync s3://npk-dictionary-west-2-20181029005812750900000002 s3://${aws_s3_bucket.dictionary.id} --exclude 'components-v3/compute-node.7z' --metadata-directive COPY --request-payer requester --source-region us-west-2 --region " + settings.primaryRegion
 			}
 		}
 	},

@@ -166,13 +166,27 @@ exports.main = async function(event, context, callback) {
 			}
 
 			if (/cancelled/.test(fleet.SpotFleetRequestState)) {
-				const fleetState = (fleet.SpotFleetRequestState == "cancelled") ? "COMPLETED" : "STOPPING";
+			// Check termination reasons FIRST before determining status
+			const wasCapacityTerminated = checkForCapacityTermination(fleet);
 
-				// Check if this was a capacity termination (should be resumable)
-				const wasCapacityTerminated = checkForCapacityTermination(fleet);
+			// NEW: Check if instances completed work before fleet was cancelled
+			const allInstancesCompletedWork = checkIfInstancesCompletedWork(fleet);
 
-				// NEW: Check if instances completed work before fleet was cancelled
-				const allInstancesCompletedWork = checkIfInstancesCompletedWork(fleet);
+			// Determine correct status based on termination reason
+			let fleetState;
+			if (wasCapacityTerminated && !allInstancesCompletedWork) {
+				// Capacity loss, work NOT done - should be STOPPED, not COMPLETED
+				fleetState = "STOPPED";
+			} else if (wasCapacityTerminated && allInstancesCompletedWork) {
+				// Capacity loss but work WAS done - this is still successful completion
+				fleetState = "COMPLETED";
+			} else if (fleet.SpotFleetRequestState == "cancelled") {
+				// Normal completion without capacity issues
+				fleetState = "COMPLETED";
+			} else {
+				// Cancelling but not cancelled yet
+				fleetState = "STOPPING";
+			}
 
 				const updateData = {
 					active: false,
@@ -187,7 +201,7 @@ exports.main = async function(event, context, callback) {
 				if (wasCapacityTerminated && !allInstancesCompletedWork) {
 					console.log(`[CAPACITY-LOSS] Fleet ${fleet.SpotFleetRequestId} was terminated due to capacity issues`);
 					console.log(`[CAPACITY-LOSS] Reason: ${wasCapacityTerminated.reason}`);
-					console.log(`[CAPACITY-LOSS] Instances did not complete work - marking as resumable`);
+					console.log(`[CAPACITY-LOSS] Instances did not complete work - marking as STOPPED and resumable`);
 
 					updateData.resumable = true;
 					updateData.interrupted = "Capacity Loss";
@@ -196,20 +210,22 @@ exports.main = async function(event, context, callback) {
 					updateData.interruptionDetails = wasCapacityTerminated.details;
 				} else if (wasCapacityTerminated && allInstancesCompletedWork) {
 					console.log(`[CAPACITY-LOSS] Fleet ${fleet.SpotFleetRequestId} had capacity issues BUT instances completed work`);
-					console.log(`[CAPACITY-LOSS] All instances terminated gracefully - NOT marking as resumable`);
+					console.log(`[CAPACITY-LOSS] All instances terminated gracefully - marking as COMPLETED, NOT resumable`);
 					console.log(`[CAPACITY-LOSS] This was a fleet-level config issue after work finished`);
 				}
 
 				promises.push(editCampaignViaRequestId(fleet.SpotFleetRequestId, updateData).then((data) => {
 					if (wasCapacityTerminated && !allInstancesCompletedWork) {
-						console.log(`[CAPACITY-LOSS] Campaign ${fleet.SpotFleetRequestId} marked as resumable - restore files should be in S3`);
+						console.log(`[CAPACITY-LOSS] Campaign ${fleet.SpotFleetRequestId} marked as STOPPED and resumable`);
+					console.log(`[CAPACITY-LOSS] Status: ${fleetState} (NOT COMPLETED)`);
+					console.log(`[CAPACITY-LOSS] Restore files should be checked in S3 before resume`);
 					} else if (wasCapacityTerminated && allInstancesCompletedWork) {
 						console.log(`[+] Campaign ${fleet.SpotFleetRequestId} completed work despite fleet capacity issues - marked as ${fleetState}`);
 					} else {
 						console.log(`[+] Marked campaign of ${fleet.SpotFleetRequestId} as ${fleetState}`);
 					}
 				}, (e) => {
-					console.log(`[!] Failed attempting to update ${promiseDetails.fleets[fleetId].SpotFleetRequestId}`);
+					console.log(`[!] Failed attempting to update ${fleet.SpotFleetRequestId}`);
 				}));
 
 				if (fleet.SpotFleetRequestState == "cancelled") {
