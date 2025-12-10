@@ -5,6 +5,29 @@ cd /root/
 # Performance logging flag - set to 1 to enable, 0 to disable
 PERF_LOGGING_ENABLED=1
 
+# Trap handler for graceful shutdown - ensures logs are synced before termination
+cleanup_and_sync_logs() {
+    echo "[SHUTDOWN] ============================================"
+    echo "[SHUTDOWN] Received termination signal, syncing logs to S3..."
+    echo "[SHUTDOWN] ============================================"
+
+    # Flush filesystem buffers
+    sync
+    sleep 2
+
+    # Final log sync - ensure all output is uploaded
+    if [ -n "$USERDATA" ] && [ -n "$USERDATAREGION" ] && [ -n "$ManifestPath" ] && [ -n "$INSTANCEID" ]; then
+        aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --include "*$${INSTANCEID}*" --include "*benchmark-results*" --include "all_cracked_hashes.txt"
+        echo "[SHUTDOWN] Logs synced successfully"
+    fi
+
+    echo "[SHUTDOWN] Cleanup complete, exiting..."
+    exit 0
+}
+
+# Register trap handlers for SIGTERM (termination) and SIGINT (Ctrl+C)
+trap cleanup_and_sync_logs SIGTERM SIGINT
+
 # Performance logging setup
 if [ "$PERF_LOGGING_ENABLED" = "1" ]; then
     START_TIME=$(date +%s)
@@ -138,10 +161,15 @@ echo <<EOF > /root/monitor_instance_action.sh
 #! /bin/bash
 
 TOKEN=\`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"\`
-ACTIONS=\$(curl -s --head -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/spot/intance_action | grep 404 | wc -l)
+ACTIONS=\$(curl -s --head -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/spot/instance-action | grep 404 | wc -l)
 if [[ \$ACTIONS -ne 1 ]]; then
-	wget "--header=X-aws-ec2-metadata-token: $TOKEN" -O /potfiles/$${INSTANCEID}-instance_action.json http://169.254.169.254/latest/meta-data/spot/intance_action
+	echo "[SPOT-INTERRUPT] Spot interruption detected, saving metadata and syncing logs..."
+	wget "--header=X-aws-ec2-metadata-token: $TOKEN" -O /potfiles/$${INSTANCEID}-instance_action.json http://169.254.169.254/latest/meta-data/spot/instance-action
+	# Flush logs to disk before syncing
+	sync
+	sleep 1
 	aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --include \"*$${INSTANCEID}*\"
+	echo "[SPOT-INTERRUPT] Logs synced successfully"
 fi
 EOF
 
@@ -161,11 +189,25 @@ log_perf "Crontab Setup" "DONE"
 log_perf "Fleet Discovery and Session Creation" "START"
 aws ec2 describe-spot-fleet-instances --region $REGION --spot-fleet-request-id $SpotFleet | jq '.ActiveInstances[].InstanceId' | sort > fleet_instances
 export INSTANCECOUNT=$(cat fleet_instances | wc -l)
-export INSTANCENUMBER=$(cat fleet_instances | grep -nr $INSTANCEID - | cut -d':' -f1)
+FLEET_POSITION=$(cat fleet_instances | grep -nr $INSTANCEID - | cut -d':' -f1)
 
 # Extract campaign ID from ManifestPath for session naming
 # ManifestPath format: {userid}/campaigns/{campaign_id}
 export CAMPAIGNID=$(echo $ManifestPath | cut -d'/' -f3)
+
+# Check if slot mapping exists (for resume scenarios)
+SLOT_MAPPING_KEY="$(echo $ManifestPath | cut -d'/' -f1)/campaigns/$${CAMPAIGNID}/resume/slot_mapping.json"
+echo "[SESSION] Checking for slot mapping at: s3://$USERDATA/$${SLOT_MAPPING_KEY}"
+
+if aws s3 cp s3://$USERDATA/$${SLOT_MAPPING_KEY} /tmp/slot_mapping.json 2>/dev/null; then
+    echo "[SESSION] Found slot mapping file - this is a resume operation"
+    # Read actual slot number from mapping: fleet position -> restore slot
+    export INSTANCENUMBER=$(jq -r ".\"$${FLEET_POSITION}\"" /tmp/slot_mapping.json)
+    echo "[SESSION] Fleet Position: $${FLEET_POSITION} -> Restore Slot: $${INSTANCENUMBER}"
+else
+    echo "[SESSION] No slot mapping found - using fleet position as slot number"
+    export INSTANCENUMBER=$${FLEET_POSITION}
+fi
 
 # Session pattern: campaignid-instancenumber (NOT instanceid!)
 # This allows new instances to resume work from terminated instances
@@ -235,6 +277,13 @@ log_perf "Hashcat Wrapper Execution" "START"
 node compute-node/hashcat_wrapper.js
 echo "[*] Hashcat wrapper finished with status code $?"
 log_perf "Hashcat Wrapper Execution" "DONE"
+
+# Flush all buffered output to disk before final S3 sync
+# This ensures all log messages (including completion logs) are written
+# before we upload to S3, preventing missing final logs
+echo "[*] Flushing logs to disk before final sync..."
+sync
+sleep 3
 
 log_perf "Final S3 Sync" "START"
 # aws s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/

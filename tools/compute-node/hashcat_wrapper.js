@@ -56,32 +56,40 @@ var credFailureCount = 0;
 var isShuttingDown = false;
 var hashcatProcess = null;  // Store reference to hashcat child process
 
-// Handle SIGTERM gracefully - backup restore files immediately
+// Handle SIGTERM gracefully - backup restore files AND sync logs immediately
 process.on('SIGTERM', async () => {
-	console.log('[SHUTDOWN] Received SIGTERM signal, backing up restore files...');
+	console.log('[SHUTDOWN] Received SIGTERM signal, backing up restore files and logs...');
 	isShuttingDown = true;
 	try {
 		// Tell hashcat to create checkpoint before we backup
 		await triggerHashcatCheckpoint();
 		await backupRestoreFiles();
 		console.log('[SHUTDOWN] Restore files backed up successfully');
+
+		// Sync logs to S3 before termination
+		await syncLogsToS3();
+		console.log('[SHUTDOWN] Logs synced successfully');
 	} catch (err) {
-		console.error('[SHUTDOWN] Failed to backup restore files:', err);
+		console.error('[SHUTDOWN] Failed to backup restore files or logs:', err);
 	}
 	process.exit(0);
 });
 
 // Handle SIGINT (Ctrl+C) gracefully as well
 process.on('SIGINT', async () => {
-	console.log('[SHUTDOWN] Received SIGINT signal, backing up restore files...');
+	console.log('[SHUTDOWN] Received SIGINT signal, backing up restore files and logs...');
 	isShuttingDown = true;
 	try {
 		// Tell hashcat to create checkpoint before we backup
 		await triggerHashcatCheckpoint();
 		await backupRestoreFiles();
 		console.log('[SHUTDOWN] Restore files backed up successfully');
+
+		// Sync logs to S3 before termination
+		await syncLogsToS3();
+		console.log('[SHUTDOWN] Logs synced successfully');
 	} catch (err) {
-		console.error('[SHUTDOWN] Failed to backup restore files:', err);
+		console.error('[SHUTDOWN] Failed to backup restore files or logs:', err);
 	}
 	process.exit(0);
 });
@@ -91,7 +99,7 @@ process.on('SIGINT', async () => {
 process.on('SIGUSR1', async () => {
 	console.log('[SPOT-WARNING] ============================================');
 	console.log('[SPOT-WARNING] Received 2-minute spot interruption warning!');
-	console.log('[SPOT-WARNING] Backing up restore files immediately...');
+	console.log('[SPOT-WARNING] Backing up restore files and logs immediately...');
 	console.log('[SPOT-WARNING] ============================================');
 	try {
 		// DON'T trigger checkpoint - hashcat auto-checkpoints periodically
@@ -100,10 +108,15 @@ process.on('SIGUSR1', async () => {
 		// At SIGTERM (2 mins later), we'll trigger checkpoint for fresh backup
 		await backupRestoreFiles();
 		console.log('[SPOT-WARNING] Restore files backed up successfully');
+
+		// Sync logs to S3 during 2-minute warning window
+		await syncLogsToS3();
+		console.log('[SPOT-WARNING] Logs synced successfully');
+
 		console.log('[SPOT-WARNING] Hashcat will continue working until termination');
 		console.log('[SPOT-WARNING] Final checkpoint will be created at SIGTERM');
 	} catch (err) {
-		console.error('[SPOT-WARNING] Failed to backup restore files:', err);
+		console.error('[SPOT-WARNING] Failed to backup restore files or logs:', err);
 	}
 	// DON'T exit - continue running until SIGTERM
 });
@@ -477,6 +490,50 @@ function backupRestoreFiles() {
 			console.error("[CHECKPOINT] ERROR: Failed to backup restore files:", err);
 			failure(err);
 		});
+	});
+}
+
+function syncLogsToS3() {
+	return new Promise((success, failure) => {
+		const { execSync } = require('child_process');
+
+		console.log("[LOG-SYNC] Flushing logs to disk before S3 upload...");
+
+		try {
+			// Flush stdout/stderr buffers
+			if (process.stdout && typeof process.stdout._handle?.flushSync === 'function') {
+				process.stdout._handle.flushSync();
+			}
+			if (process.stderr && typeof process.stderr._handle?.flushSync === 'function') {
+				process.stderr._handle.flushSync();
+			}
+
+			// Flush filesystem buffers
+			execSync('sync', { stdio: 'inherit' });
+
+			// Give filesystem a moment to complete the flush
+			setTimeout(() => {
+				console.log("[LOG-SYNC] Syncing logs to S3...");
+
+				// Sync the output log and any cracked hashes to S3
+				// Note: all_cracked_hashes.txt only exists after sendFinished() runs
+				// During shutdown signals, only sync per-instance files
+				const syncCommand = `aws --region ${primaryRegion} s3 sync /potfiles/ s3://${userdata_bucket}/${manifestpath}/potfiles/ --include "*${instance_id}*"`;
+
+				try {
+					execSync(syncCommand, { stdio: 'inherit' });
+					console.log("[LOG-SYNC] ✓ Logs synced successfully to S3");
+					console.log("[LOG-SYNC] Location: s3://" + userdata_bucket + "/" + manifestpath + "/potfiles/");
+					success(true);
+				} catch (err) {
+					console.error("[LOG-SYNC] ERROR: Failed to sync logs to S3:", err);
+					failure(err);
+				}
+			}, 2000);
+		} catch (err) {
+			console.error("[LOG-SYNC] ERROR: Failed to flush logs:", err);
+			failure(err);
+		}
 	});
 }
 
