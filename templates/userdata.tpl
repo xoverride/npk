@@ -17,7 +17,7 @@ cleanup_and_sync_logs() {
 
     # Final log sync - ensure all output is uploaded
     if [ -n "$USERDATA" ] && [ -n "$USERDATAREGION" ] && [ -n "$ManifestPath" ] && [ -n "$INSTANCEID" ]; then
-        aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --include "*$${INSTANCEID}*" --include "*benchmark-results*" --include "all_cracked_hashes.txt"
+        aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --exclude "*.log" --include "*$${INSTANCEID}*" --include "*benchmark-results*" --include "all_cracked_hashes.txt"
         echo "[SHUTDOWN] Logs synced successfully"
     fi
 
@@ -168,7 +168,7 @@ if [[ \$ACTIONS -ne 1 ]]; then
 	# Flush logs to disk before syncing
 	sync
 	sleep 1
-	aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --include \"*$${INSTANCEID}*\"
+	aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --exclude \"*.log\" --include \"*$${INSTANCEID}*\"
 	echo "[SPOT-INTERRUPT] Logs synced successfully"
 fi
 EOF
