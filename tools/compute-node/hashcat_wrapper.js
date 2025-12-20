@@ -703,16 +703,58 @@ function cleanupRestoreFiles() {
 		console.log("[CLEANUP] Deleting restore files from S3...");
 		console.log("[CLEANUP] S3 bucket:", userdata_bucket);
 		console.log("[CLEANUP] S3 paths:", s3RestorePath, s3RestorePosPath);
-		Promise.all([
-			s3.deleteObject({ Bucket: userdata_bucket, Key: s3RestorePath }).promise().catch(() => {}),
-			s3.deleteObject({ Bucket: userdata_bucket, Key: s3RestorePosPath }).promise().catch(() => {})
-		]).then(() => {
-			console.log("[CLEANUP] ✓ S3 restore files deleted successfully");
-			console.log("[CLEANUP] Job complete - all restore files removed");
-			console.log("[CLEANUP] ========================================");
-			success(true);
+
+		// Delete main restore file with proper error handling
+		const deletePromises = [
+			s3.deleteObject({ Bucket: userdata_bucket, Key: s3RestorePath }).promise()
+				.then(() => {
+					console.log("[CLEANUP] ✓ Deleted restore file:", s3RestorePath);
+					return true;
+				})
+				.catch((err) => {
+					console.error("[CLEANUP] ✗ Failed to delete restore file:", s3RestorePath);
+					console.error("[CLEANUP] Error code:", err.code);
+					console.error("[CLEANUP] Error message:", err.message);
+					console.error("[CLEANUP] Full error:", JSON.stringify(err, null, 2));
+					return false;
+				})
+		];
+
+		// Delete .pos file if it exists (optional, don't fail if missing)
+		deletePromises.push(
+			s3.deleteObject({ Bucket: userdata_bucket, Key: s3RestorePosPath }).promise()
+				.then(() => {
+					console.log("[CLEANUP] ✓ Deleted restore.pos file:", s3RestorePosPath);
+					return true;
+				})
+				.catch((err) => {
+					// .pos file is optional, only log if it's not a "not found" error
+					if (err.code !== 'NoSuchKey' && err.code !== 'NotFound') {
+						console.error("[CLEANUP] ✗ Failed to delete restore.pos file:", s3RestorePosPath);
+						console.error("[CLEANUP] Error code:", err.code);
+						console.error("[CLEANUP] Error message:", err.message);
+					}
+					return false;
+				})
+		);
+
+		Promise.all(deletePromises).then((results) => {
+			const mainFileDeleted = results[0];
+			if (mainFileDeleted) {
+				console.log("[CLEANUP] ✓ S3 restore files deleted successfully");
+				console.log("[CLEANUP] Job complete - all restore files removed");
+				console.log("[CLEANUP] ========================================");
+				success(true);
+			} else {
+				console.log("[CLEANUP] ⚠ Failed to delete main restore file");
+				console.log("[CLEANUP] Files may need manual cleanup");
+				console.log("[CLEANUP] Check IAM permissions for s3:DeleteObject on this bucket");
+				console.log("[CLEANUP] ========================================");
+				// Still call success() because hashcat job is done, just cleanup failed
+				success(false);
+			}
 		}).catch((err) => {
-			console.log("[CLEANUP] Error cleaning up S3 restore files:", err);
+			console.error("[CLEANUP] Unexpected error during cleanup:", err);
 			failure(err);
 		});
 	});
