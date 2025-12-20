@@ -284,7 +284,7 @@ exports.main = async function(event, context, callback) {
 
 			// Upload slot mapping to S3
 			try {
-				const mappingKey = `${entity}/campaigns/${campaignId}/resume/slot_mapping.json`;
+				const mappingKey = `${entity}/campaigns/${campaignId}/restore/slot_mapping.json`;
 				await s3.putObject({
 					Bucket: variables.userdata_bucket,
 					Key: mappingKey,

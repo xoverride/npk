@@ -196,7 +196,7 @@ FLEET_POSITION=$(cat fleet_instances | grep -nr $INSTANCEID - | cut -d':' -f1)
 export CAMPAIGNID=$(echo $ManifestPath | cut -d'/' -f3)
 
 # Check if slot mapping exists (for resume scenarios)
-SLOT_MAPPING_KEY="$(echo $ManifestPath | cut -d'/' -f1)/campaigns/$${CAMPAIGNID}/resume/slot_mapping.json"
+SLOT_MAPPING_KEY="$(echo $ManifestPath | cut -d'/' -f1)/campaigns/$${CAMPAIGNID}/restore/slot_mapping.json"
 echo "[SESSION] Checking for slot mapping at: s3://$USERDATA/$${SLOT_MAPPING_KEY}"
 
 if aws s3 cp s3://$USERDATA/$${SLOT_MAPPING_KEY} /tmp/slot_mapping.json 2>/dev/null; then

@@ -638,7 +638,7 @@ local regionKeys = std.objectFields(settings.regions);
 			],
 			resources: [
 				"${aws_s3_bucket.user_data.arn}/*/campaigns/*/manifest.json",
-				"${aws_s3_bucket.user_data.arn}/*/campaigns/*/resume/slot_mapping.json"
+				"${aws_s3_bucket.user_data.arn}/*/campaigns/*/restore/slot_mapping.json"
 			]
 		},{
 			sid: "ec2",
