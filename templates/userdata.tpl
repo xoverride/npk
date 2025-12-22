@@ -157,10 +157,6 @@ log_perf "File Decompression" "DONE"
 # Link the output file to potfiles
 ln -s /var/log/cloud-init-output.log /potfiles/$${INSTANCEID}-output.log
 
-chmod +x /root/monitor_instance_action.sh
-
-cat /root/monitor_instance_action.sh
-
 log_perf "Crontab Setup" "START"
 # Create the crontab to sync s3
 # NOTE: Potfiles still use INSTANCEID (each physical instance has separate output)
