@@ -161,8 +161,8 @@ log_perf "Crontab Setup" "START"
 # Create the crontab to sync s3
 # NOTE: Potfiles still use INSTANCEID (each physical instance has separate output)
 # But restore files use SESSIONPATTERN (logical slot, transferable between instances)
-echo "* * * * * root /usr/local/bin/aws --region $USERDATAREGION s3 sync s3://$USERDATA/$ManifestPath/potfiles/ /potfiles/ --exclude \"*$${INSTANCEID}*\" --exclude \"*benchmark-results*\"" >> /etc/crontab
-echo "* * * * * root /usr/local/bin/aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --include \"*$${INSTANCEID}*\" --include \"*benchmark-results*\"" >> /etc/crontab
+echo "* * * * * root /usr/local/bin/aws --region $USERDATAREGION s3 sync s3://$USERDATA/$ManifestPath/potfiles/ /potfiles/ --exclude *.log --exclude \"*benchmark-results*\"" >> /etc/crontab
+echo "* * * * * root /usr/local/bin/aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --exclude * --include \"*$${INSTANCEID}*\" --include \"*benchmark-results*\"" >> /etc/crontab
 log_perf "Crontab Setup" "DONE"
 
 log_perf "Fleet Discovery and Session Creation" "START"
