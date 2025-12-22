@@ -157,22 +157,6 @@ log_perf "File Decompression" "DONE"
 # Link the output file to potfiles
 ln -s /var/log/cloud-init-output.log /potfiles/$${INSTANCEID}-output.log
 
-echo <<EOF > /root/monitor_instance_action.sh
-#! /bin/bash
-
-TOKEN=\`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"\`
-ACTIONS=\$(curl -s --head -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/spot/instance-action | grep 404 | wc -l)
-if [[ \$ACTIONS -ne 1 ]]; then
-	echo "[SPOT-INTERRUPT] Spot interruption detected, saving metadata and syncing logs..."
-	wget "--header=X-aws-ec2-metadata-token: $TOKEN" -O /potfiles/$${INSTANCEID}-instance_action.json http://169.254.169.254/latest/meta-data/spot/instance-action
-	# Flush logs to disk before syncing
-	sync
-	sleep 1
-	aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --exclude \"*.log\" --include \"*$${INSTANCEID}*\"
-	echo "[SPOT-INTERRUPT] Logs synced successfully"
-fi
-EOF
-
 chmod +x /root/monitor_instance_action.sh
 
 cat /root/monitor_instance_action.sh
@@ -183,7 +167,6 @@ log_perf "Crontab Setup" "START"
 # But restore files use SESSIONPATTERN (logical slot, transferable between instances)
 echo "* * * * * root /usr/local/bin/aws --region $USERDATAREGION s3 sync s3://$USERDATA/$ManifestPath/potfiles/ /potfiles/ --exclude \"*$${INSTANCEID}*\" --exclude \"*benchmark-results*\"" >> /etc/crontab
 echo "* * * * * root /usr/local/bin/aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --include \"*$${INSTANCEID}*\" --include \"*benchmark-results*\"" >> /etc/crontab
-echo "* * * * * root /root/monitor_instance_action.sh" >> /etc/crontab
 log_perf "Crontab Setup" "DONE"
 
 log_perf "Fleet Discovery and Session Creation" "START"
