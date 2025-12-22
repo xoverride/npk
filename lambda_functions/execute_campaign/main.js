@@ -210,10 +210,29 @@ exports.main = async function(event, context, callback) {
 			console.log(`[RESUME] Found ${restoreFiles.Contents?.length || 0} restore files in S3`);
 
 			// Count unique instance IDs from restore files
+			// CRITICAL: Must use two-pass approach to avoid race conditions with file ordering
 			const instancesWithRestoreFiles = new Set();
 			const restoreFileDetails = [];
+			const completedSessions = new Set();
 
+			// FIRST PASS: Identify all completed sessions
+			// This ensures we know which sessions are complete before processing restore files
 			if (restoreFiles.Contents) {
+				console.log(`[RESUME] First pass: Identifying completed sessions...`);
+				restoreFiles.Contents.forEach(file => {
+					const completedMatch = file.Key.match(/\/([^\/]+)-(\d+)\.completed$/);
+					if (completedMatch) {
+						const sessionName = `${completedMatch[1]}-${completedMatch[2]}`;
+						const instanceNumber = parseInt(completedMatch[2]);
+						completedSessions.add(sessionName);
+						console.log(`[RESUME] Found completion signal for instance slot ${instanceNumber} (session already finished)`);
+					}
+				});
+
+				console.log(`[RESUME] Found ${completedSessions.size} completed sessions`);
+				console.log(`[RESUME] Second pass: Processing restore files...`);
+
+				// SECOND PASS: Process restore files, skipping completed sessions
 				restoreFiles.Contents.forEach(file => {
 					// Extract session pattern from filename like "campaign_id-1.restore"
 					// Session pattern is: campaign_id-instance_number
@@ -221,17 +240,31 @@ exports.main = async function(event, context, callback) {
 					if (match) {
 						const sessionName = `${match[1]}-${match[2]}`;  // e.g., "campaign123-1"
 						const instanceNumber = parseInt(match[2]);
-						instancesWithRestoreFiles.add(sessionName);
-						restoreFileDetails.push({
-							sessionName: sessionName,
-							instanceNumber: instanceNumber,
-							size: file.Size,
-							lastModified: file.LastModified.toISOString()
-						});
-						console.log(`[RESUME] Found restore file for instance slot ${instanceNumber} (${file.Size} bytes, modified ${file.LastModified.toISOString()})`);
+
+						// Skip if this session has a completion signal
+						if (completedSessions.has(sessionName)) {
+							console.log(`[RESUME] Skipping restore file for slot ${instanceNumber} (completion signal exists)`);
+							return;
+						}
+
+						// Only count restore files with non-zero size (incomplete sessions)
+						if (file.Size > 0) {
+							instancesWithRestoreFiles.add(sessionName);
+							restoreFileDetails.push({
+								sessionName: sessionName,
+								instanceNumber: instanceNumber,
+								size: file.Size,
+								lastModified: file.LastModified.toISOString()
+							});
+							console.log(`[RESUME] Found restore file for instance slot ${instanceNumber} (${file.Size} bytes, modified ${file.LastModified.toISOString()})`);
+						} else {
+							console.log(`[RESUME] Skipping 0-byte restore file for slot ${instanceNumber} (likely corrupted or placeholder)`);
+						}
 					}
 				});
 			}
+
+			console.log(`[RESUME] Summary: ${completedSessions.size} completed, ${instancesWithRestoreFiles.size} incomplete sessions`);
 
 			resumeInstanceCount = instancesWithRestoreFiles.size;
 

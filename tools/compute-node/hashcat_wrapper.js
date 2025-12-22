@@ -253,6 +253,7 @@ function checkForRestore(params) {
 		const restorePosFile = `/root/hashcat/${session_name}.restore.pos`;
 		const s3RestorePath = `${manifestpath}/restore/${session_name}.restore`;
 		const s3RestorePosPath = `${manifestpath}/restore/${session_name}.restore.pos`;
+		const s3CompletedPath = `${manifestpath}/restore/${session_name}.completed`;
 
 		console.log("[RESUME-CHECK] ========================================");
 		console.log("[RESUME-CHECK] Checking for restore files to resume job");
@@ -261,13 +262,56 @@ function checkForRestore(params) {
 		console.log("[RESUME-CHECK] Session Name:", session_name, "(used for restore files)");
 		console.log("[RESUME-CHECK] S3 Bucket:", userdata_bucket);
 		console.log("[RESUME-CHECK] S3 Restore Path:", s3RestorePath);
+		console.log("[RESUME-CHECK] S3 Completed Signal Path:", s3CompletedPath);
 		console.log("[RESUME-CHECK] ========================================");
 
 		// Check if restore files exist in S3 (.pos file is optional)
+		// Also check for completion signal (.completed file)
 		Promise.all([
 			s3.headObject({ Bucket: userdata_bucket, Key: s3RestorePath }).promise().catch(() => null),
-			s3.headObject({ Bucket: userdata_bucket, Key: s3RestorePosPath }).promise().catch(() => null)
-		]).then(([restoreExists, restorePosExists]) => {
+			s3.headObject({ Bucket: userdata_bucket, Key: s3RestorePosPath }).promise().catch(() => null),
+			s3.headObject({ Bucket: userdata_bucket, Key: s3CompletedPath }).promise().catch(() => null)
+		]).then(([restoreExists, restorePosExists, completedExists]) => {
+			// If completion signal exists, this is a CRITICAL ERROR
+			// The campaign orchestrator should never assign a completed session to a new instance
+			if (completedExists) {
+				console.error("[RESUME-CHECK] ========================================");
+				console.error("[RESUME-CHECK] 🚨 CRITICAL ERROR: Completion signal found!");
+				console.error("[RESUME-CHECK] ========================================");
+				console.error("[RESUME-CHECK] Session Name:", session_name);
+				console.error("[RESUME-CHECK] Instance ID:", instance_id);
+				console.error("[RESUME-CHECK] Instance Number:", instance_number);
+				console.error("[RESUME-CHECK] Completion Signal:", s3CompletedPath);
+				console.error("[RESUME-CHECK] ========================================");
+				console.error("[RESUME-CHECK] This session was already completed!");
+				console.error("[RESUME-CHECK] The campaign orchestrator incorrectly assigned");
+				console.error("[RESUME-CHECK] a completed session to this instance.");
+				console.error("[RESUME-CHECK] ========================================");
+				console.error("[RESUME-CHECK] This is a bug in execute_campaign Lambda.");
+				console.error("[RESUME-CHECK] The slot mapping or resume logic is incorrect.");
+				console.error("[RESUME-CHECK] ========================================");
+				console.error("[RESUME-CHECK] SHUTTING DOWN to prevent duplicate work.");
+				console.error("[RESUME-CHECK] ========================================");
+				logPerf("Restore File Check", "CRITICAL_ERROR");
+
+				// Send error to API Gateway if possible
+				if (credentialsReady) {
+					sendStatusUpdate({
+						error: "CRITICAL: Instance assigned to completed session",
+						sessionName: session_name,
+						instanceId: instance_id,
+						instanceNumber: instance_number,
+						completionSignal: s3CompletedPath
+					}).catch(() => {
+						console.error("[RESUME-CHECK] Failed to send error status update");
+					}).finally(() => {
+						process.exit(1);
+					});
+				} else {
+					process.exit(1);
+				}
+				return;
+			}
 			if (restoreExists) {
 				console.log("[RESUME-CHECK] ✓ Restore files FOUND in S3!");
 				console.log("[RESUME-CHECK] Restore file size:", restoreExists.ContentLength, "bytes");
@@ -719,10 +763,11 @@ function cleanupRestoreFiles() {
 		const restorePosFile = `/root/hashcat/${session_name}.restore.pos`;
 		const s3RestorePath = `${manifestpath}/restore/${session_name}.restore`;
 		const s3RestorePosPath = `${manifestpath}/restore/${session_name}.restore.pos`;
+		const s3CompletedPath = `${manifestpath}/restore/${session_name}.completed`;
 
 		console.log("[CLEANUP] ========================================");
 		console.log("[CLEANUP] Hashcat job completed successfully");
-		console.log("[CLEANUP] Cleaning up restore files (no longer needed)");
+		console.log("[CLEANUP] Uploading 0-byte completion signal");
 		console.log("[CLEANUP] ========================================");
 
 		// Delete local restore files (.pos file is optional)
@@ -739,64 +784,41 @@ function cleanupRestoreFiles() {
 			console.log("[CLEANUP] Error deleting local restore files:", err);
 		}
 
-		// Delete S3 restore files (.pos file is optional)
-		console.log("[CLEANUP] Deleting restore files from S3...");
+		// Upload 0-byte completion signal file to S3 (separate file, not overwriting restore files)
+		console.log("[CLEANUP] Uploading 0-byte completion signal to S3...");
 		console.log("[CLEANUP] S3 bucket:", userdata_bucket);
-		console.log("[CLEANUP] S3 paths:", s3RestorePath, s3RestorePosPath);
+		console.log("[CLEANUP] S3 completion signal path:", s3CompletedPath);
 
-		// Delete main restore file with proper error handling
-		const deletePromises = [
-			s3.deleteObject({ Bucket: userdata_bucket, Key: s3RestorePath }).promise()
-				.then(() => {
-					console.log("[CLEANUP] ✓ Deleted restore file:", s3RestorePath);
-					return true;
-				})
-				.catch((err) => {
-					console.error("[CLEANUP] ✗ Failed to delete restore file:", s3RestorePath);
-					console.error("[CLEANUP] Error code:", err.code);
-					console.error("[CLEANUP] Error message:", err.message);
-					console.error("[CLEANUP] Full error:", JSON.stringify(err, null, 2));
-					return false;
-				})
-		];
-
-		// Delete .pos file if it exists (optional, don't fail if missing)
-		deletePromises.push(
-			s3.deleteObject({ Bucket: userdata_bucket, Key: s3RestorePosPath }).promise()
-				.then(() => {
-					console.log("[CLEANUP] ✓ Deleted restore.pos file:", s3RestorePosPath);
-					return true;
-				})
-				.catch((err) => {
-					// .pos file is optional, only log if it's not a "not found" error
-					if (err.code !== 'NoSuchKey' && err.code !== 'NotFound') {
-						console.error("[CLEANUP] ✗ Failed to delete restore.pos file:", s3RestorePosPath);
-						console.error("[CLEANUP] Error code:", err.code);
-						console.error("[CLEANUP] Error message:", err.message);
-					}
-					return false;
-				})
-		);
-
-		Promise.all(deletePromises).then((results) => {
-			const mainFileDeleted = results[0];
-			if (mainFileDeleted) {
-				console.log("[CLEANUP] ✓ S3 restore files deleted successfully");
-				console.log("[CLEANUP] Job complete - all restore files removed");
+		// Upload 0-byte .completed file as completion signal
+		s3.putObject({
+			Bucket: userdata_bucket,
+			Key: s3CompletedPath,
+			Body: Buffer.alloc(0),  // 0-byte buffer
+			ContentType: 'application/octet-stream',
+			Metadata: {
+				'session-name': session_name,
+				'completed-timestamp': new Date().toISOString(),
+				'instance-id': instance_id
+			}
+		}).promise()
+			.then(() => {
+				console.log("[CLEANUP] ✓ Uploaded 0-byte completion signal:", s3CompletedPath);
+				console.log("[CLEANUP] ✓ Restore files remain in S3 for reference");
+				console.log("[CLEANUP] Job complete - session marked as completed");
 				console.log("[CLEANUP] ========================================");
 				success(true);
-			} else {
-				console.log("[CLEANUP] ⚠ Failed to delete main restore file");
-				console.log("[CLEANUP] Files may need manual cleanup");
-				console.log("[CLEANUP] Check IAM permissions for s3:DeleteObject on this bucket");
+			})
+			.catch((err) => {
+				console.error("[CLEANUP] ✗ Failed to upload completion signal:", s3CompletedPath);
+				console.error("[CLEANUP] Error code:", err.code);
+				console.error("[CLEANUP] Error message:", err.message);
+				console.error("[CLEANUP] Full error:", JSON.stringify(err, null, 2));
+				console.log("[CLEANUP] ⚠ Completion signal upload failed");
+				console.log("[CLEANUP] Check IAM permissions for s3:PutObject on this bucket");
 				console.log("[CLEANUP] ========================================");
-				// Still call success() because hashcat job is done, just cleanup failed
+				// Still call success() because hashcat job is done, just signal failed
 				success(false);
-			}
-		}).catch((err) => {
-			console.error("[CLEANUP] Unexpected error during cleanup:", err);
-			failure(err);
-		});
+			});
 	});
 }
 
