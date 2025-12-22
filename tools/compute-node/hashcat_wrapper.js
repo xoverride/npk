@@ -644,7 +644,7 @@ function runHashcat(params) {
 				https://github.com/hashcat/hashcat/blob/master/docs/status_codes.txt	*/
 
 			if (code > -1) {
-				console.log("\n\nCracking job exited successfully.\n");
+				console.log("\n\nCracking job exited successfully. With Code: " + code + "\n" );
 				logPerf("Hashcat Execution", "DONE");
 				// Clean up restore files on successful completion
 				cleanupRestoreFiles().then(() => {
