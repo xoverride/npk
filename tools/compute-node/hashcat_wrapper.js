@@ -56,6 +56,41 @@ var credFailureCount = 0;
 var isShuttingDown = false;
 var hashcatProcess = null;  // Store reference to hashcat child process
 
+// Function to update instance ID in restore file
+// The restore file is binary data containing hashcat's saved state
+// It includes the output file path with the old instance ID
+// We need to replace the old instance ID with the new one
+function updateInstanceIdInRestore(restoreData) {
+	// Convert buffer to binary string to preserve exact bytes
+	const dataStr = restoreData.toString('binary');
+
+	// Find the pattern: /potfiles/cracked_hashes-i-XXXXXXXXXXXXXXXXX.txt
+	// The instance ID pattern is: i-[17 hex characters]
+	const outputFilePattern = /\/potfiles\/cracked_hashes-(i-[0-9a-f]{17})\.txt/g;
+
+	// Search for the old instance ID in the restore file
+	const match = outputFilePattern.exec(dataStr);
+
+	if (match && match[1]) {
+		const oldInstanceId = match[1];
+		console.log("[RESUME-CHECK] Found old instance ID in restore file:", oldInstanceId);
+		console.log("[RESUME-CHECK] Replacing with new instance ID:", instance_id);
+
+		// Replace all occurrences of the old instance ID with the new one
+		// Use binary string replacement to preserve exact byte structure
+		const newDataStr = dataStr.replace(new RegExp(oldInstanceId, 'g'), instance_id);
+
+		// Convert back to buffer using binary encoding
+		const newData = Buffer.from(newDataStr, 'binary');
+
+		console.log("[RESUME-CHECK] Instance ID replacement complete");
+		return newData;
+	} else {
+		console.log("[RESUME-CHECK] No instance ID found in restore file, using as-is");
+		return restoreData;
+	}
+}
+
 // Handle SIGTERM gracefully - backup restore files AND sync logs immediately
 process.on('SIGTERM', async () => {
 	console.log('[SHUTDOWN] Received SIGTERM signal, backing up restore files and logs...');
@@ -248,8 +283,13 @@ function checkForRestore(params) {
 				const downloads = [
 					s3.getObject({ Bucket: userdata_bucket, Key: s3RestorePath }).promise()
 						.then(data => {
-							fs.writeFileSync(restoreFile, data.Body);
+							// Update instance ID in restore file to use current instance
+							// The restore file contains the old instance ID in the output file path
+							// We need to replace it with the new instance ID so hashcat writes to the correct file
+							const updatedData = updateInstanceIdInRestore(data.Body);
+							fs.writeFileSync(restoreFile, updatedData);
 							console.log("[RESUME-CHECK] ✓ Downloaded", s3RestorePath, "->", restoreFile);
+							console.log("[RESUME-CHECK] ✓ Updated instance ID in restore file");
 							return data;
 						})
 				];
