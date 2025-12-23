@@ -727,15 +727,19 @@ function runHashcat(params) {
 			/* 	Only treating negative numbers as actual errors, based on:
 				https://github.com/hashcat/hashcat/blob/master/docs/status_codes.txt	*/
 
-			if (code > -1) {
+			if (code === 0 || code === 1) {
 				console.log("\n\nCracking job exited successfully. With Code: " + code + "\n" );
 				logPerf("Hashcat Execution", "DONE");
-				// Clean up restore files on successful completion
+				// Clean up restore files only for code 0 (success) or code 1 (exhausted)
 				cleanupRestoreFiles().then(() => {
 					return success(sendFinished(true));
 				}).catch(() => {
 					return success(sendFinished(true));
 				});
+			} else if (code > 1) {
+				console.log("\n\nHashcat exited with code " + code + " (not exhausted/cracked, preserving restore files)\n");
+				logPerf("Hashcat Execution", "DONE_WITH_STATUS_" + code);
+				return success(sendFinished(true));
 			} else {
 				console.log("\n\nDied with code " + code + " and signal " + signal + "\n");
 				if (output.length > 0) {
