@@ -1,7 +1,7 @@
 #! /bin/bash -xe
 
 amazon-linux-extras install -y epel
-yum install -y wget jq curl tar xz
+yum install -y --allowerasing wget jq curl tar xz
 
 # Download latest 7-Zip binary from GitHub
 LATEST_7Z_RELEASE=$(curl -s https://api.github.com/repos/ip7z/7zip/releases/latest | jq -r '.tag_name' 2>/dev/null)
@@ -24,11 +24,11 @@ if [[ -n "$LATEST_7Z_RELEASE" && "$LATEST_7Z_RELEASE" != "null" ]]; then
 		echo "[+] 7-Zip $LATEST_7Z_RELEASE installed successfully"
 	else
 		echo "[!] Failed to download 7-Zip from GitHub, falling back to p7zip"
-		yum install -y p7zip
+		yum install -y --allowerasing p7zip
 	fi
 else
 	echo "[!] Failed to fetch 7-Zip release info, falling back to p7zip"
-	yum install -y p7zip
+	yum install -y --allowerasing p7zip
 fi
 
 mkfs.ext4 /dev/nvme1n1

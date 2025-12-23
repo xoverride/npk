@@ -14,7 +14,7 @@ fi
 # install compiler, cmake3, and 7z
 if [[ ! -f /usr/bin/cmake ]]; then
         echo "[*] Installing CMake3, C++, and dependencies"
-        sudo yum install -y cmake3 gcc-c++ jq curl tar xz > /dev/null
+        sudo yum install -y --allowerasing cmake3 gcc-c++ jq curl tar xz > /dev/null
         sudo ln -s /usr/bin/cmake3 /usr/bin/cmake
 fi
 
@@ -41,11 +41,11 @@ if [[ ! -f /usr/local/bin/7z ]]; then
                         echo "[+] 7-Zip $LATEST_7Z_RELEASE installed successfully"
                 else
                         echo "[!] Failed to download 7-Zip from GitHub, falling back to p7zip"
-                        sudo yum install -y p7zip p7zip-plugins > /dev/null
+                        sudo yum install -y --allowerasing p7zip p7zip-plugins > /dev/null
                 fi
         else
                 echo "[!] Failed to fetch 7-Zip release info, falling back to p7zip"
-                sudo yum install -y p7zip p7zip-plugins > /dev/null
+                sudo yum install -y --allowerasing p7zip p7zip-plugins > /dev/null
         fi
 fi
 
