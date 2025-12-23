@@ -46,17 +46,6 @@ else
     log_perf() { :; }  # No-op function when disabled
 fi
 
-# Link the output file to potfiles
-ln -s /var/log/cloud-init-output.log /potfiles/$${INSTANCEID}-output.log
-
-log_perf "Crontab Setup" "START"
-# Create the crontab to sync s3
-# NOTE: Potfiles still use INSTANCEID (each physical instance has separate output)
-# But restore files use SESSIONPATTERN (logical slot, transferable between instances)
-echo "* * * * * root aws --region $USERDATAREGION s3 sync s3://$USERDATA/$ManifestPath/potfiles/ /potfiles/ --exclude \"*.log\" --exclude \"*benchmark-results*\"" >> /etc/crontab
-echo "* * * * * root aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --exclude \"*\" --include \"*$${INSTANCEID}*\" --include \"*benchmark-results*\"" >> /etc/crontab
-log_perf "Crontab Setup" "DONE"
-
 echo {{APIGATEWAY}} > /root/apigateway
 
 log_perf "Environment Setup" "START"
@@ -70,6 +59,17 @@ aws ec2 describe-tags --region $REGION --filter "Name=resource-id,Values=$INSTAN
 
 . ec2-tags
 log_perf "Environment Setup" "DONE"
+
+# Link the output file to potfiles
+ln -s /var/log/cloud-init-output.log /potfiles/$${INSTANCEID}-output.log
+
+log_perf "Crontab Setup" "START"
+# Create the crontab to sync s3
+# NOTE: Potfiles still use INSTANCEID (each physical instance has separate output)
+# But restore files use SESSIONPATTERN (logical slot, transferable between instances)
+echo "* * * * * root aws --region $USERDATAREGION s3 sync s3://$USERDATA/$ManifestPath/potfiles/ /potfiles/ --exclude \"*.log\" --exclude \"*benchmark-results*\"" >> /etc/crontab
+echo "* * * * * root aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --exclude \"*\" --include \"*$${INSTANCEID}*\" --include \"*benchmark-results*\"" >> /etc/crontab
+log_perf "Crontab Setup" "DONE"
 
 # This is required for the wrapper to get anything done.
 export ManifestPath=$ManifestPath
@@ -147,10 +147,10 @@ if [[ -z "$LATEST_7Z_RELEASE" || "$LATEST_7Z_RELEASE" == "null" ]]; then
 	echo "[*] Installing p7zip from package manager as fallback"
 	# AMD systems (AL2) need EPEL for p7zip
 	if [[ `lspci | grep AMD | wc -l` -gt 0 ]]; then
-		yum install -y --allowerasing p7zip p7zip-plugins
+		yum install -y p7zip p7zip-plugins
 	else
 		# Try to install p7zip if available
-		yum install -y --allowerasing p7zip p7zip-plugins 2>/dev/null || echo "[!] p7zip not available, 7z operations may fail"
+		yum install -y p7zip p7zip-plugins 2>/dev/null || echo "[!] p7zip not available, 7z operations may fail"
 	fi
 
 	# Verify p7zip installation
