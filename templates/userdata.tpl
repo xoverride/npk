@@ -16,9 +16,53 @@ cleanup_and_sync_logs() {
     sleep 2
 
     # Final log sync - ensure all output is uploaded
+    # Check if the symlinked log file exists in /potfiles/ for regular sync to handle
+    SYNC_CONDITIONS_MET=0
     if [ -n "$USERDATA" ] && [ -n "$USERDATAREGION" ] && [ -n "$ManifestPath" ] && [ -n "$INSTANCEID" ]; then
-        aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --exclude "*.log" --include "*$${INSTANCEID}*" --include "*benchmark-results*" --include "all_cracked_hashes.txt"
-        echo "[SHUTDOWN] Logs synced successfully"
+        if [ -f "/potfiles/$${INSTANCEID}-output.log" ]; then
+            aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --exclude "*.log" --include "*$${INSTANCEID}*" --include "*benchmark-results*" --include "all_cracked_hashes.txt"
+            echo "[SHUTDOWN] Logs synced successfully (including /potfiles/$${INSTANCEID}-output.log)"
+            SYNC_CONDITIONS_MET=1
+        else
+            echo "[SHUTDOWN] Warning: /potfiles/$${INSTANCEID}-output.log not found, falling back to direct upload"
+        fi
+    else
+        echo "[SHUTDOWN] Regular log sync conditions not met"
+    fi
+
+    # Fallback: Upload cloud-init-output.log to npk-logs- bucket if regular sync didn't handle it
+    if [ "$SYNC_CONDITIONS_MET" -eq 0 ]; then
+        echo "[SHUTDOWN] Attempting fallback log upload to npk-logs- bucket..."
+        # Variables injected from terraform: ${logsBucket} and ${userdataRegion}
+
+        CLOUD_INIT_LOG=""
+        if [ -f "/var/log/cloud-init-output.log" ]; then
+            CLOUD_INIT_LOG="/var/log/cloud-init-output.log"
+        elif [ -f "/potfiles/$${INSTANCEID}-output.log" ]; then
+            CLOUD_INIT_LOG="/potfiles/$${INSTANCEID}-output.log"
+        fi
+
+        if [ -n "$CLOUD_INIT_LOG" ]; then
+            # Get instance ID with fallback
+            UPLOAD_INSTANCE_ID="$${INSTANCEID}"
+            if [ -z "$UPLOAD_INSTANCE_ID" ]; then
+                TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" 2>/dev/null)
+                if [ -n "$TOKEN" ]; then
+                    UPLOAD_INSTANCE_ID=$(wget --header="X-aws-ec2-metadata-token: $TOKEN" -qO- http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null)
+                fi
+                if [ -z "$UPLOAD_INSTANCE_ID" ]; then
+                    UPLOAD_INSTANCE_ID="unknown-$(hostname)-$(date +%s)"
+                fi
+            fi
+
+            TIMESTAMP=$(date -u +"%Y%m%d-%H%M%S")
+            LOG_KEY="instance-logs/$${UPLOAD_INSTANCE_ID}/$${TIMESTAMP}-cloud-init-output.log"
+
+            echo "[SHUTDOWN] Fallback: Uploading cloud-init log: $CLOUD_INIT_LOG -> s3://${logsBucket}/$${LOG_KEY}"
+            aws --region ${userdataRegion} s3 cp "$CLOUD_INIT_LOG" "s3://${logsBucket}/$${LOG_KEY}" 2>&1 | tee -a /tmp/log-upload.log || echo "[SHUTDOWN] Warning: Fallback log upload failed"
+        else
+            echo "[SHUTDOWN] Warning: cloud-init-output.log not found for fallback upload"
+        fi
     fi
 
     echo "[SHUTDOWN] Cleanup complete, exiting..."
@@ -26,7 +70,7 @@ cleanup_and_sync_logs() {
 }
 
 # Register trap handlers for SIGTERM (termination) and SIGINT (Ctrl+C)
-trap cleanup_and_sync_logs SIGTERM SIGINT
+trap cleanup_and_sync_logs SIGTERM SIGINT ERR
 
 # Performance logging setup
 if [ "$PERF_LOGGING_ENABLED" = "1" ]; then

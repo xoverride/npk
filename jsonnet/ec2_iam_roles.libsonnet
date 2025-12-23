@@ -130,6 +130,14 @@
 					"resources": [
 						"${aws_api_gateway_deployment.%s.execution_arn}*/statusreport/*" % apiName
 					]
+				}, {
+					"sid": "7",
+					"actions": [
+						"s3:PutObject"
+					],
+					"resources": [
+						"${aws_s3_bucket.logs.arn}/instance-logs/*"
+					]
 				}]
 			}
 		}

@@ -1164,7 +1164,8 @@ local regionKeys = std.objectFields(settings.regions);
 					vars: {
 						dictionaryBucket: "${aws_s3_bucket.dictionary.id}",
 						userdata: "${aws_s3_bucket.user_data.id}",
-						userdataRegion: settings.primaryRegion
+						userdataRegion: settings.primaryRegion,
+						logsBucket: "${aws_s3_bucket.logs.id}"
 					}
 				}
 			}
