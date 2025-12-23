@@ -70,7 +70,7 @@ export BUCKETREGION=${userdataRegion}
 echo "Using dictionary bucket $BUCKET";
 
 log_perf "Driver and Package Installation" "START"
-# AMD drivers are only available on AL2, which needs EPEL for 7zip
+# AMD drivers are only available on AL2
 if [[ `lspci | grep AMD | wc -l` -gt 0 ]]; then
 	aws s3 cp s3://$BUCKET/components-v3/epel.rpm .
 	rpm -Uvh epel.rpm
@@ -81,8 +81,80 @@ else
 	systemctl start crond.service
 fi
 
-yum install -y p7zip p7zip-plugins
+yum install -y jq curl tar xz
 log_perf "Driver and Package Installation" "DONE"
+
+log_perf "7-Zip Binary Download" "START"
+# Download latest 7-Zip binary from official GitHub releases
+# Get the latest release version dynamically
+LATEST_7Z_RELEASE=$(curl -s https://api.github.com/repos/ip7z/7zip/releases/latest | jq -r '.tag_name' 2>/dev/null)
+
+if [[ -n "$LATEST_7Z_RELEASE" && "$LATEST_7Z_RELEASE" != "null" ]]; then
+	LATEST_7Z_VERSION=$(echo $LATEST_7Z_RELEASE | tr -d '.')
+
+	echo "[*] Downloading 7-Zip version $LATEST_7Z_RELEASE from GitHub"
+
+	# Detect architecture and download appropriate binary
+	if [[ $(uname -m) == "aarch64" ]]; then
+		DOWNLOAD_URL="https://github.com/ip7z/7zip/releases/download/$LATEST_7Z_RELEASE/7z$${LATEST_7Z_VERSION}-linux-arm64.tar.xz"
+	else
+		DOWNLOAD_URL="https://github.com/ip7z/7zip/releases/download/$LATEST_7Z_RELEASE/7z$${LATEST_7Z_VERSION}-linux-x64.tar.xz"
+	fi
+
+	if curl -L -o /tmp/7z.tar.xz "$DOWNLOAD_URL" 2>/dev/null && [ -f /tmp/7z.tar.xz ]; then
+		# Extract 7z binary to /usr/local/bin
+		tar -xf /tmp/7z.tar.xz -C /tmp/ 2>/dev/null
+		if [ -f /tmp/7zz ]; then
+			mv /tmp/7zz /usr/local/bin/7z
+			chmod +x /usr/local/bin/7z
+			rm -f /tmp/7z.tar.xz
+
+			# Verify installation
+			if /usr/local/bin/7z --help > /dev/null 2>&1; then
+				echo "[+] 7-Zip $LATEST_7Z_RELEASE installed successfully from GitHub"
+				# Create symlink for compatibility
+				ln -sf /usr/local/bin/7z /usr/local/bin/7za
+			else
+				echo "[!] 7-Zip binary verification failed, falling back to p7zip"
+				rm -f /usr/local/bin/7z
+				LATEST_7Z_RELEASE=""
+			fi
+		else
+			echo "[!] 7-Zip extraction failed, falling back to p7zip"
+			LATEST_7Z_RELEASE=""
+		fi
+	else
+		echo "[!] 7-Zip download failed, falling back to p7zip"
+		LATEST_7Z_RELEASE=""
+	fi
+else
+	echo "[!] Unable to fetch latest 7-Zip release info, falling back to p7zip"
+fi
+
+# Fallback to p7zip if GitHub download failed
+if [[ -z "$LATEST_7Z_RELEASE" || "$LATEST_7Z_RELEASE" == "null" ]]; then
+	echo "[*] Installing p7zip from package manager as fallback"
+	# AMD systems (AL2) need EPEL for p7zip
+	if [[ `lspci | grep AMD | wc -l` -gt 0 ]]; then
+		yum install -y p7zip p7zip-plugins
+	else
+		# Try to install p7zip if available
+		yum install -y p7zip p7zip-plugins 2>/dev/null || echo "[!] p7zip not available, 7z operations may fail"
+	fi
+
+	# Verify p7zip installation
+	if command -v 7za &> /dev/null; then
+		echo "[+] p7zip installed successfully as fallback"
+		# Create symlink for consistency
+		ln -sf $(which 7za) /usr/local/bin/7z 2>/dev/null || true
+	elif command -v 7z &> /dev/null; then
+		echo "[+] 7z available from system packages"
+	else
+		echo "[!] WARNING: No 7z binary available - archive operations will fail"
+	fi
+fi
+
+log_perf "7-Zip Binary Download" "DONE"
 
 mkdir /potfiles
 
@@ -161,8 +233,8 @@ log_perf "Crontab Setup" "START"
 # Create the crontab to sync s3
 # NOTE: Potfiles still use INSTANCEID (each physical instance has separate output)
 # But restore files use SESSIONPATTERN (logical slot, transferable between instances)
-echo "* * * * * root /usr/local/bin/aws --region $USERDATAREGION s3 sync s3://$USERDATA/$ManifestPath/potfiles/ /potfiles/ --exclude *.log --exclude \"*benchmark-results*\"" >> /etc/crontab
-echo "* * * * * root /usr/local/bin/aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --exclude * --include \"*$${INSTANCEID}*\" --include \"*benchmark-results*\"" >> /etc/crontab
+echo "* * * * * root aws --region $USERDATAREGION s3 sync s3://$USERDATA/$ManifestPath/potfiles/ /potfiles/ --exclude \"*.log\" --exclude \"*benchmark-results*\"" >> /etc/crontab
+echo "* * * * * root aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --exclude \"*\" --include \"*$${INSTANCEID}*\" --include \"*benchmark-results*\"" >> /etc/crontab
 log_perf "Crontab Setup" "DONE"
 
 log_perf "Fleet Discovery and Session Creation" "START"

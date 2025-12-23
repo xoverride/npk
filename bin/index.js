@@ -496,15 +496,63 @@ async function buildAndUploadComputeNode(aws) {
 	console.log("[*] Building and uploading updated compute-node.7z with checkpoint/resume support");
 	console.log("================================================================================\n");
 
-	// Check if 7z is installed
+	// Check if 7z is installed, try to install latest from GitHub if not
+	let has7z = false;
 	try {
 		await execPromise('7z --help');
+		has7z = true;
 	} catch (e) {
+		console.log("[*] 7z not found, attempting to download latest from GitHub...");
+
+		try {
+			// Get latest release
+			const { stdout: releaseTag } = await execPromise('curl -s https://api.github.com/repos/ip7z/7zip/releases/latest | jq -r .tag_name');
+			const version = releaseTag.trim().replace(/\./g, '');
+
+			// Detect architecture
+			const { stdout: arch } = await execPromise('uname -m');
+			const archType = arch.trim() === 'aarch64' || arch.trim() === 'arm64' ? 'arm64' : 'x64';
+
+			// Determine platform
+			const { stdout: platform } = await execPromise('uname -s');
+			const platformType = platform.trim().toLowerCase();
+
+			let downloadUrl;
+			if (platformType === 'darwin') {
+				downloadUrl = `https://github.com/ip7z/7zip/releases/download/${releaseTag.trim()}/7z${version}-mac.tar.xz`;
+			} else {
+				downloadUrl = `https://github.com/ip7z/7zip/releases/download/${releaseTag.trim()}/7z${version}-linux-${archType}.tar.xz`;
+			}
+
+			console.log(`[*] Downloading 7-Zip ${releaseTag.trim()} for ${platformType}-${archType}...`);
+
+			// Download and extract
+			await execPromise(`curl -L -o /tmp/7z.tar.xz "${downloadUrl}"`);
+			await execPromise('tar -xf /tmp/7z.tar.xz -C /tmp/');
+
+			// Move to /usr/local/bin (may need sudo on Linux)
+			try {
+				await execPromise('sudo mv /tmp/7zz /usr/local/bin/7z && sudo chmod +x /usr/local/bin/7z');
+			} catch (e) {
+				// Try without sudo (macOS/user writable)
+				await execPromise('mv /tmp/7zz /usr/local/bin/7z && chmod +x /usr/local/bin/7z');
+			}
+
+			await execPromise('rm -f /tmp/7z.tar.xz');
+			console.log(`[+] Successfully installed 7-Zip ${releaseTag.trim()}`);
+			has7z = true;
+		} catch (installError) {
+			console.log("[!] Failed to install 7-Zip from GitHub");
+		}
+	}
+
+	if (!has7z) {
 		console.log("[!] WARNING: 7z is not installed. Cannot build compute-node.7z");
-		console.log("[!] Please install p7zip and run deployment again:");
+		console.log("[!] Please install 7-Zip manually:");
 		console.log("    - macOS: brew install p7zip");
 		console.log("    - Linux: sudo yum install -y p7zip p7zip-plugins");
 		console.log("    - Ubuntu/Debian: sudo apt-get install -y p7zip-full");
+		console.log("    - Or download from: https://github.com/ip7z/7zip/releases");
 		return false;
 	}
 

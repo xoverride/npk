@@ -1,7 +1,35 @@
 #! /bin/bash -xe
 
 amazon-linux-extras install -y epel
-yum install -y wget p7zip
+yum install -y wget jq curl tar xz
+
+# Download latest 7-Zip binary from GitHub
+LATEST_7Z_RELEASE=$(curl -s https://api.github.com/repos/ip7z/7zip/releases/latest | jq -r '.tag_name' 2>/dev/null)
+
+if [[ -n "$LATEST_7Z_RELEASE" && "$LATEST_7Z_RELEASE" != "null" ]]; then
+	LATEST_7Z_VERSION=$(echo $LATEST_7Z_RELEASE | tr -d '.')
+
+	# Detect architecture
+	if [[ $(uname -m) == "aarch64" ]]; then
+		DOWNLOAD_URL="https://github.com/ip7z/7zip/releases/download/$LATEST_7Z_RELEASE/7z${LATEST_7Z_VERSION}-linux-arm64.tar.xz"
+	else
+		DOWNLOAD_URL="https://github.com/ip7z/7zip/releases/download/$LATEST_7Z_RELEASE/7z${LATEST_7Z_VERSION}-linux-x64.tar.xz"
+	fi
+
+	if curl -L -o /tmp/7z.tar.xz "$DOWNLOAD_URL" 2>/dev/null && tar -xf /tmp/7z.tar.xz -C /tmp/ 2>/dev/null && [ -f /tmp/7zz ]; then
+		mv /tmp/7zz /usr/local/bin/7z
+		chmod +x /usr/local/bin/7z
+		ln -sf /usr/local/bin/7z /usr/local/bin/7za
+		rm -f /tmp/7z.tar.xz
+		echo "[+] 7-Zip $LATEST_7Z_RELEASE installed successfully"
+	else
+		echo "[!] Failed to download 7-Zip from GitHub, falling back to p7zip"
+		yum install -y p7zip
+	fi
+else
+	echo "[!] Failed to fetch 7-Zip release info, falling back to p7zip"
+	yum install -y p7zip
+fi
 
 mkfs.ext4 /dev/nvme1n1
 

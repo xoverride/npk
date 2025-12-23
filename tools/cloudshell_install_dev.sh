@@ -11,11 +11,42 @@ if [[ $UID -eq 0 ]]; then
         return 1
 fi
 
-# install compiler, cmake3, and p7zip
+# install compiler, cmake3, and 7z
 if [[ ! -f /usr/bin/cmake ]]; then
-        echo "[*] Installing CMake3, C++, and p7zip"
-        sudo yum install -y cmake3 gcc-c++ p7zip p7zip-plugins > /dev/null
+        echo "[*] Installing CMake3, C++, and dependencies"
+        sudo yum install -y cmake3 gcc-c++ jq curl tar xz > /dev/null
         sudo ln -s /usr/bin/cmake3 /usr/bin/cmake
+fi
+
+# Download latest 7-Zip binary from GitHub if not already installed
+if [[ ! -f /usr/local/bin/7z ]]; then
+        echo "[*] Installing latest 7-Zip from GitHub"
+        LATEST_7Z_RELEASE=$(curl -s https://api.github.com/repos/ip7z/7zip/releases/latest | jq -r '.tag_name' 2>/dev/null)
+
+        if [[ -n "$LATEST_7Z_RELEASE" && "$LATEST_7Z_RELEASE" != "null" ]]; then
+                LATEST_7Z_VERSION=$(echo $LATEST_7Z_RELEASE | tr -d '.')
+
+                # Detect architecture
+                if [[ $(uname -m) == "aarch64" ]]; then
+                        DOWNLOAD_URL="https://github.com/ip7z/7zip/releases/download/$LATEST_7Z_RELEASE/7z${LATEST_7Z_VERSION}-linux-arm64.tar.xz"
+                else
+                        DOWNLOAD_URL="https://github.com/ip7z/7zip/releases/download/$LATEST_7Z_RELEASE/7z${LATEST_7Z_VERSION}-linux-x64.tar.xz"
+                fi
+
+                if curl -L -o /tmp/7z.tar.xz "$DOWNLOAD_URL" 2>/dev/null && tar -xf /tmp/7z.tar.xz -C /tmp/ 2>/dev/null && [ -f /tmp/7zz ]; then
+                        sudo mv /tmp/7zz /usr/local/bin/7z
+                        sudo chmod +x /usr/local/bin/7z
+                        sudo ln -sf /usr/local/bin/7z /usr/local/bin/7za
+                        rm -f /tmp/7z.tar.xz
+                        echo "[+] 7-Zip $LATEST_7Z_RELEASE installed successfully"
+                else
+                        echo "[!] Failed to download 7-Zip from GitHub, falling back to p7zip"
+                        sudo yum install -y p7zip p7zip-plugins > /dev/null
+                fi
+        else
+                echo "[!] Failed to fetch 7-Zip release info, falling back to p7zip"
+                sudo yum install -y p7zip p7zip-plugins > /dev/null
+        fi
 fi
 
 # install nvm and node
