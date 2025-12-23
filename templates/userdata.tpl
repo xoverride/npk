@@ -34,27 +34,13 @@ cleanup_and_sync_logs() {
     if [ "$SYNC_CONDITIONS_MET" -eq 0 ]; then
         echo "[SHUTDOWN] Attempting fallback log upload to npk-logs- bucket..."
         # Variables injected from terraform: ${logsBucket} and ${userdataRegion}
-
-        CLOUD_INIT_LOG=""
-        if [ -f "/var/log/cloud-init-output.log" ]; then
-            CLOUD_INIT_LOG="/var/log/cloud-init-output.log"
-        elif [ -f "/potfiles/$${INSTANCEID}-output.log" ]; then
-            CLOUD_INIT_LOG="/potfiles/$${INSTANCEID}-output.log"
-        fi
-
+         CLOUD_INIT_LOG="/var/log/cloud-init-output.log"
         if [ -n "$CLOUD_INIT_LOG" ]; then
             # Get instance ID with fallback
             UPLOAD_INSTANCE_ID="$${INSTANCEID}"
             if [ -z "$UPLOAD_INSTANCE_ID" ]; then
-                TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" 2>/dev/null)
-                if [ -n "$TOKEN" ]; then
-                    UPLOAD_INSTANCE_ID=$(wget --header="X-aws-ec2-metadata-token: $TOKEN" -qO- http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null)
-                fi
-                if [ -z "$UPLOAD_INSTANCE_ID" ]; then
-                    UPLOAD_INSTANCE_ID="unknown-$(hostname)-$(date +%s)"
-                fi
+                UPLOAD_INSTANCE_ID="unknown-$(hostname)-$(date +%s)"
             fi
-
             TIMESTAMP=$(date -u +"%Y%m%d-%H%M%S")
             LOG_KEY="instance-logs/$${UPLOAD_INSTANCE_ID}/$${TIMESTAMP}-cloud-init-output.log"
 
@@ -108,9 +94,6 @@ log_perf "Environment Setup" "DONE"
 ln -s /var/log/cloud-init-output.log /potfiles/$${INSTANCEID}-output.log
 
 log_perf "Crontab Setup" "START"
-# Create the crontab to sync s3
-# NOTE: Potfiles still use INSTANCEID (each physical instance has separate output)
-# But restore files use SESSIONPATTERN (logical slot, transferable between instances)
 echo "* * * * * root aws --region $USERDATAREGION s3 sync s3://$USERDATA/$ManifestPath/potfiles/ /potfiles/ --exclude \"*.log\" --exclude \"*benchmark-results*\"" >> /etc/crontab
 echo "* * * * * root aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --exclude \"*\" --include \"*$${INSTANCEID}*\" --include \"*benchmark-results*\"" >> /etc/crontab
 log_perf "Crontab Setup" "DONE"
@@ -388,20 +371,3 @@ sleep 30
 if [[ ! -f /root/nodeath ]]; then
 	poweroff
 fi
-# ===============================
-
-# Use this to generate benchmarks
-# /root/hashcat/hashcat.bin -O -w 4 -b --benchmark-all | tee /potfiles/benchmark-results.txt
-# aws --region $USERDATAREGION s3 cp /potfiles/benchmark-results.txt s3://$USERDATA/$ManifestPath/potfiles/
-
-# poweroff
-# ===============================
-
-# Use this to generate wordlist benchmarks
-# aws s3 cp s3://$BUCKET/components-v3/hashstash.7z .
-# 7z x hashstash.7z
-# ls hashstash | awk ' { system("./hashcat/hashcat.bin -O -w 4 --keep-guessing --runtime 20 -m " $1 " -a 0 -r npk-rules/npk-maskprocessor.rule -r npk-rules/OneRuleToRuleThemAll.rule ./hashstash/" $1 " ./npk-wordlist/rockyou.txt | grep -e Speed.# -e Hash.Mode | tee -a /potfiles/wordlist-benchmark-results.txt") } '
-# aws --region $USERDATAREGION s3 cp /potfiles/wordlist-benchmark-results.txt s3://$USERDATA/$ManifestPath/potfiles/
-
-# poweroff
-# ===============================
