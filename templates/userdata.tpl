@@ -129,14 +129,14 @@ log_perf "Driver and Package Installation" "START"
 if [[ `lspci | grep AMD | wc -l` -gt 0 ]]; then
 	aws s3 cp s3://$BUCKET/components-v3/epel.rpm .
 	rpm -Uvh epel.rpm
-	yum install -y --allowerasing jq opencl-amdgpu-pro
+	yum install -y jq opencl-amdgpu-pro
 else
 	# AL2023 does not support crontab by default
-	yum install -y --allowerasing cronie
+	yum install -y cronie
 	systemctl start crond.service
 fi
 
-yum install -y --allowerasing jq curl tar xz
+yum install -y jq curl tar xz
 log_perf "Driver and Package Installation" "DONE"
 
 log_perf "7-Zip Binary Download" "START"
@@ -189,13 +189,8 @@ fi
 # Fallback to p7zip if GitHub download failed
 if [[ -z "$LATEST_7Z_RELEASE" || "$LATEST_7Z_RELEASE" == "null" ]]; then
 	echo "[*] Installing p7zip from package manager as fallback"
-	# AMD systems (AL2) need EPEL for p7zip
-	if [[ `lspci | grep AMD | wc -l` -gt 0 ]]; then
-		yum install -y p7zip p7zip-plugins
-	else
-		# Try to install p7zip if available
-		yum install -y p7zip p7zip-plugins 2>/dev/null || echo "[!] p7zip not available, 7z operations may fail"
-	fi
+	# Try to install p7zip (should work since EPEL is already installed on AMD systems)
+	yum install -y p7zip p7zip-plugins 2>/dev/null || echo "[!] p7zip not available in repos, will try direct install"
 
 	# Verify p7zip installation
 	if command -v 7za &> /dev/null; then
