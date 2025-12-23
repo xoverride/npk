@@ -46,6 +46,17 @@ else
     log_perf() { :; }  # No-op function when disabled
 fi
 
+# Link the output file to potfiles
+ln -s /var/log/cloud-init-output.log /potfiles/$${INSTANCEID}-output.log
+
+log_perf "Crontab Setup" "START"
+# Create the crontab to sync s3
+# NOTE: Potfiles still use INSTANCEID (each physical instance has separate output)
+# But restore files use SESSIONPATTERN (logical slot, transferable between instances)
+echo "* * * * * root aws --region $USERDATAREGION s3 sync s3://$USERDATA/$ManifestPath/potfiles/ /potfiles/ --exclude \"*.log\" --exclude \"*benchmark-results*\"" >> /etc/crontab
+echo "* * * * * root aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --exclude \"*\" --include \"*$${INSTANCEID}*\" --include \"*benchmark-results*\"" >> /etc/crontab
+log_perf "Crontab Setup" "DONE"
+
 echo {{APIGATEWAY}} > /root/apigateway
 
 log_perf "Environment Setup" "START"
@@ -225,17 +236,6 @@ ls -alh ./npk-rules/
 jq -r '.dictionaryFile' manifest.json | xargs -L1 -I'{}' rm ./npk-{}
 jq -r '.rulesFiles[]' manifest.json | xargs -L1 -I'{}' rm -f ./npk-{}
 log_perf "File Decompression" "DONE"
-
-# Link the output file to potfiles
-ln -s /var/log/cloud-init-output.log /potfiles/$${INSTANCEID}-output.log
-
-log_perf "Crontab Setup" "START"
-# Create the crontab to sync s3
-# NOTE: Potfiles still use INSTANCEID (each physical instance has separate output)
-# But restore files use SESSIONPATTERN (logical slot, transferable between instances)
-echo "* * * * * root aws --region $USERDATAREGION s3 sync s3://$USERDATA/$ManifestPath/potfiles/ /potfiles/ --exclude \"*.log\" --exclude \"*benchmark-results*\"" >> /etc/crontab
-echo "* * * * * root aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --exclude \"*\" --include \"*$${INSTANCEID}*\" --include \"*benchmark-results*\"" >> /etc/crontab
-log_perf "Crontab Setup" "DONE"
 
 log_perf "Fleet Discovery and Session Creation" "START"
 aws ec2 describe-spot-fleet-instances --region $REGION --spot-fleet-request-id $SpotFleet | jq '.ActiveInstances[].InstanceId' | sort > fleet_instances
