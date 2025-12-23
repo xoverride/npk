@@ -90,6 +90,8 @@ aws ec2 describe-tags --region $REGION --filter "Name=resource-id,Values=$INSTAN
 . ec2-tags
 log_perf "Environment Setup" "DONE"
 
+mkdir /potfiles
+
 # Link the output file to potfiles
 ln -s /var/log/cloud-init-output.log /potfiles/$${INSTANCEID}-output.log
 
@@ -188,8 +190,6 @@ if [[ -z "$LATEST_7Z_RELEASE" || "$LATEST_7Z_RELEASE" == "null" ]]; then
 fi
 
 log_perf "7-Zip Binary Download" "DONE"
-
-mkdir /potfiles
 
 log_perf "Device Format and Mount" "START"
 # format & mount /dev/xvdb
