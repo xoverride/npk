@@ -27,3 +27,6 @@ tools/upload_npkfile.sh
 tools/upload_npkcomponents.sh
 tools/sync_npkcomponents.sh
 **.bak
+/docs
+/test-log
+/tests
