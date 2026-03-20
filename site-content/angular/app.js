@@ -195,13 +195,19 @@ angular
 	        	return 'Instantly';
 	        }
 
+	  		var args = Array.prototype.slice.call(arguments, 2);
+
+	        // Skip if any argument is NaN (e.g. startTime not yet loaded)
+	        for (var a = 0; a < args.length; a++) {
+	        	if (typeof args[a] === 'number' && isNaN(args[a])) { return 'N/A'; }
+	        }
+
 	        // Cache key to prevent recalculation
-	        var cacheKey = input + ':' + momentFn + ':' + Array.prototype.slice.call(arguments, 2).join(':');
+	        var cacheKey = input + ':' + momentFn + ':' + args.join(':');
 	        if (cache[cacheKey]) {
 	        	return cache[cacheKey];
 	        }
 
-	  		var args = Array.prototype.slice.call(arguments, 2);
 	        var momentObj = moment((input * 1000));
 
 	        // Validate moment object and function exist
