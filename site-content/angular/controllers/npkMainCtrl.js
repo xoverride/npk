@@ -54,9 +54,7 @@ angular
 
           // console.log(pricingSvc.hashTypes.$dirty);
 
-          if (!$scope.$$phase) {
-            $scope.$digest();
-          }
+          $scope.$evalAsync();
 
           console.log("Settings loaded.");
 
@@ -223,7 +221,7 @@ angular
             };
           }
 
-          $scope.$apply();
+          $scope.$evalAsync();
           return this;
         }
       };
@@ -289,8 +287,9 @@ angular
           $scope.$parent.cognitoSvc.init();
           $scope.$parent.cognitoSvc.onReady.then(() => {
             $scope.$parent.handleLogin();
-            $location.path('/dashboard');
-            $scope.$apply();
+            $scope.$evalAsync(function() {
+              $location.path('/dashboard');
+            });
           });
         }).catch((err) => {
           console.log(err);
@@ -349,7 +348,7 @@ angular
           $scope.signIn();
         }, (e) => {
           $scope.adminCompleteAuthErrors = [e];
-          $scope.$digest();
+          $scope.$evalAsync();
         });
       };
 
@@ -428,7 +427,7 @@ angular
         }, 0);
       };
    }])
-  .controller('dashboardCtrl', ['$scope', '$routeParams', '$timeout', 'APIGATEWAY_URL', function($scope, $routeParams, $timeout, APIGATEWAY_URL) {
+  .controller('dashboardCtrl', ['$scope', '$routeParams', '$timeout', '$interval', 'APIGATEWAY_URL', function($scope, $routeParams, $timeout, $interval, APIGATEWAY_URL) {
 
       window.dashboardCtrl = $scope;
 
@@ -439,6 +438,8 @@ angular
         } catch (e) {
           return false;
         }
+
+        $scope.campaigns_loaded = false;
 
         return $scope.$parent.npkDB.select('self:campaigns:', 'Campaigns').then((data) => {
           $scope.campaigns = JSON.parse(JSON.stringify(data)); //Deepcopy lol
@@ -453,6 +454,11 @@ angular
             $scope.campaigns.totals.hashes += $scope.campaigns[e].hashes;
             $scope.active_campaigns += ((data[e].active) ? 1 : 0);
             $scope.inactive_campaigns += ((!data[e].active) ? 1 : 0);
+
+            // Pre-compute last spot request event to avoid .slice() in template
+            if ($scope.campaigns[e].spotRequestHistory && $scope.campaigns[e].spotRequestHistory.length > 0) {
+              $scope.campaigns[e].lastSpotEvent = $scope.campaigns[e].spotRequestHistory[$scope.campaigns[e].spotRequestHistory.length - 1];
+            }
 
             promises.push($scope.$parent.npkDB.select('self:' + e.split(':')[2] + ':nodes:', 'Campaigns'));
             promises.push($scope.$parent.npkDB.select('self:' + e.split(':')[2] + ':events:', 'Campaigns'));
@@ -533,21 +539,33 @@ angular
 
             $scope.campaigns.totals.recovered_hashes += $scope.campaigns[campaign_id].recovered_hashes;
           });
-          
 
           $scope.campaigns_loaded = true;
-          $scope.$apply();
+          $scope.$evalAsync();
+
           return $scope.campaigns;
 
         }).catch((e) => {
           console.trace();
+          console.error("Error loading dashboard:", e);
+          $scope.campaigns_loaded = true;
+          $scope.$evalAsync();
           throw Error(e);
         });
         // End campaigns
       };
 
-      $scope.now = function() {
-        return Math.floor(new Date().getTime() / 1000);
+      // Initialize now once - do not update to avoid digest loops
+      $scope.now = Math.floor(Date.now() / 1000);
+
+      // Helper function to get campaign price - avoids hasOwnProperty in templates
+      $scope.getCampaignPrice = function(campaign) {
+        if (!campaign) return 0;
+        var accumulated = parseFloat(campaign.accumulatedPrice) || 0;
+        var current = campaign.hasOwnProperty('currentFleetPrice')
+          ? (parseFloat(campaign.currentFleetPrice) || 0)
+          : (parseFloat(campaign.price) || 0);
+        return accumulated + current;
       };
 
       $scope.objLength = function(what) {
@@ -571,10 +589,28 @@ angular
 
       $scope.timeout = "";
       $scope.tickTock = function() {
-        $scope.populateDashboard()
-        $timeout(function() {
-          $scope.tickTock();
-        }, 30000);
+        var result = $scope.populateDashboard();
+
+        // Check if populateDashboard returned a promise
+        if (result && typeof result.then === 'function') {
+          result.then(function() {
+            // Schedule next update after data is loaded
+            $timeout(function() {
+              $scope.tickTock();
+            }, 30000);
+          }).catch(function(e) {
+            console.error("Error in tickTock:", e);
+            // Still schedule next tick even on error
+            $timeout(function() {
+              $scope.tickTock();
+            }, 30000);
+          });
+        } else {
+          // If npkDB is not ready, retry after 1 second
+          $timeout(function() {
+            $scope.tickTock();
+          }, 1000);
+        }
       };
 
       $scope.executeCampaign = function(campaign_id) {
@@ -609,7 +645,7 @@ angular
             $scope.modalMessages.success = [data.msg];
           }
 
-          $scope.$digest();
+          $scope.$evalAsync();
 
           $('#messageModal').modal('show');
 
@@ -634,7 +670,7 @@ angular
             $scope.modalMessages.success = [data.msg];
           }
 
-          $scope.$digest();
+          $scope.$evalAsync();
 
           $('#messageModal').modal('show');
           $('img#action-' + campaign_id).hide();
@@ -764,7 +800,7 @@ angular
               effectiveness
             });
 
-            $scope.$digest();
+            $scope.$evalAsync();
             $scope.pricesLoaded = true;
 
           }
@@ -785,7 +821,7 @@ angular
 
       $scope.rulesFiles = data;
       $scope.rules_loading = false;
-      $scope.$digest();
+      $scope.$evalAsync();
       $('#rules_select').multiSelect('refresh');
     });
 
@@ -796,7 +832,7 @@ angular
 
       $scope.wordlistFiles = data;
       $scope.wordlist_loading = false;
-      $scope.$digest();
+      $scope.$evalAsync();
       // $('#wordlist_select').multiSelect('refresh');
     });
 
@@ -951,7 +987,7 @@ angular
 
         $scope.wordlistAttackStats.total.requiredDuration = Math.floor($scope.wordlistAttackStats.total.keyspace / (pricingSvc.gpuSpeeds?.[$scope.selectedFamily.gpu]?.[$scope.hashType] || 1) / FAMILIES[$scope.selectedFamily.gpu].instances[$scope.selectedInstance.instanceType][0])
 
-        $scope.$digest();
+        $scope.$evalAsync();
       });
     }
 
@@ -1283,7 +1319,7 @@ angular
 
       $scope.upload_ready = false;
       $scope.uploading_hashes = true;
-      $scope.$digest();
+      $scope.$evalAsync();
 
       $('#textuploadbtn').hide();
       var uploader = new AWS.S3.ManagedUpload({
@@ -1291,7 +1327,7 @@ angular
       })
       .on('httpUploadProgress', function(evt) {
         $scope.uploadProgress = Math.floor(evt.loaded / file.size * 100);
-        $scope.$digest();
+        $scope.$evalAsync();
       })
       .send(function(err, result) {
         if (err) {
@@ -1303,7 +1339,7 @@ angular
         $scope.uploading_hashes = false;
         $scope.upload_finished = true;
         $scope.uploadedFile = file.name;
-        $scope.$digest();
+        $scope.$evalAsync();
 
         $scope.getHashFiles();
       });
@@ -1329,7 +1365,7 @@ angular
       })
       .on('httpUploadProgress', function(evt) {
         $scope.uploadProgress = Math.floor(evt.loaded / evt.total * 100);
-        $scope.$digest();
+        $scope.$evalAsync();
       })
       .send(function(err, result) {
         if (err) {
@@ -1340,7 +1376,7 @@ angular
         $scope.uploading_hashes = false;
         $scope.upload_finished = true;
         $scope.uploadedFile = filename;
-        $scope.$digest();
+        $scope.$evalAsync();
 
         $scope.getHashFiles();
       });
@@ -1364,7 +1400,7 @@ angular
 
         $scope.hashesFiles = data;
         $scope.hashfiles_loading = false;
-        $scope.$digest();
+        $scope.$evalAsync();
       });
     }
 
@@ -1536,7 +1572,7 @@ angular
         
         $scope.orderResponse = data;
         $scope.campaignId = data.campaignId;
-        $scope.$digest();
+        $scope.$evalAsync();
       
       })
       .fail((data) => {
@@ -1553,7 +1589,7 @@ angular
 
         $scope.orderErrors = [response.msg];
         $scope.orderWarnings = [];
-        $scope.$digest();
+        $scope.$evalAsync();
         $('#orderErrorModal').modal('show');
       });
     }
@@ -1647,7 +1683,7 @@ angular
 
         $scope.pathTree = $scope.getPathTree(Object.keys($scope.files));
         $scope.files_loading = false;
-        $scope.$digest();
+        $scope.$evalAsync();
       });
     }
 
@@ -1675,7 +1711,7 @@ angular
         }
 
         $scope.large_file_uploading = false;
-        $scope.$digest();
+        $scope.$evalAsync();
 
         return success(true);
       });
@@ -1704,7 +1740,7 @@ angular
           $('div#s3HiddenElems').append(`<input type="hidden" name="${key}" value="${data.fields[key]}" />`);
         });
         console.log(data);
-        $scope.$digest();
+        $scope.$evalAsync();
       });
     }
 
@@ -1727,7 +1763,7 @@ angular
         } else {
           delete $scope.files[key];
           $scope.populateFiles();
-          $scope.$digest();
+          $scope.$evalAsync();
         }
       });
     };
@@ -1780,7 +1816,7 @@ angular
        $scope.onReady();
     });
   }])
-  .controller('cmCtrl', ['$scope', '$routeParams', '$location', 'USERDATA_BUCKET', 'pricingSvc', 'FAMILIES', function($scope, $routeParams, $location, USERDATA_BUCKET, pricingSvc, FAMILIES) {
+  .controller('cmCtrl', ['$scope', '$routeParams', '$location', '$timeout', '$interval', 'USERDATA_BUCKET', 'pricingSvc', 'FAMILIES', function($scope, $routeParams, $location, $timeout, $interval, USERDATA_BUCKET, pricingSvc, FAMILIES) {
 
     $scope.data = {};
     $scope.campaigns = {};
@@ -1813,9 +1849,17 @@ angular
       });
     });
 
-    // Add now() function for time percentage calculations
-    $scope.now = function() {
-      return Math.floor(new Date().getTime() / 1000);
+    // Add now property for time percentage calculations (static value)
+    $scope.now = Math.floor(Date.now() / 1000);
+
+    // Helper function to get campaign price - avoids hasOwnProperty in templates
+    $scope.getCampaignPrice = function(campaign) {
+      if (!campaign) return 0;
+      var accumulated = parseFloat(campaign.accumulatedPrice) || 0;
+      var current = campaign.hasOwnProperty('currentFleetPrice')
+        ? (parseFloat(campaign.currentFleetPrice) || 0)
+        : (parseFloat(campaign.price) || 0);
+      return accumulated + current;
     };
 
     $scope.getTypeFromHash = function(hashId) {
@@ -1977,13 +2021,25 @@ angular
         });
 
         $scope.data = campaigns["self:campaigns:".concat(campaign)];
+
+        // Pre-calculate values to avoid recalculation in template
+        if ($scope.data && $scope.data.base) {
+          $scope.data.base.calculatedPrice = $scope.getCampaignPrice($scope.data.base);
+          $scope.data.base.pricePercentage = ($scope.data.base.calculatedPrice / $scope.data.base.targetPrice) * 100;
+        }
+
         console.log($scope.data);
+
         $scope.campaigns_loaded = true;
-        $scope.$apply();
+        $scope.$evalAsync();
+
         return $scope.campaigns;
 
       }).catch((e) => {
         console.trace(e);
+        console.error("Error loading campaign details:", e);
+        $scope.campaigns_loaded = true;
+        $scope.$evalAsync();
         throw Error(e);
       });
     }
@@ -2003,13 +2059,13 @@ angular
       $scope.campaigns_loaded = false;
       $scope.$parent.npkDB.select('self:campaigns:', 'Campaigns').then((data) => {
         $scope.campaigns = {};
-        
+
         Object.keys(data).forEach(function(i) {
           $scope.campaigns[i.split(':')[2]] = data[i];
         })
 
         $scope.campaigns_loaded = true;
-        $scope.$digest();
+        $scope.$evalAsync();
       });
     }
 
@@ -2019,9 +2075,8 @@ angular
         try {
           $scope.manifest = JSON.parse(data.Body.toString('ascii'));
         } catch (e) {
-          $scope.manifest = false;          
+          $scope.manifest = false;
           console.log('Unable to parse manifest');
-          $scope.$digest();
           return false;
         }
 
@@ -2031,13 +2086,12 @@ angular
         $scope.manifest.instanceGeneration = instance[0].toUpperCase();
         $scope.manifest.instanceSize = instance[1];
 
-
-        $scope.$digest();
         console.log($scope.manifest);
+        $scope.$evalAsync();
 
       }, (e) => {
         $scope.manifest = false;
-        $scope.$digest();
+        $scope.$evalAsync();
         console.log('Error retrieving campaign manifest: ' + e)
       });
     }
@@ -2103,7 +2157,7 @@ angular
           $scope.$parent.settings.favoriteHashTypes = [].concat($scope.settings.self.favoriteHashTypes).concat($scope.settings.admin.favoriteHashTypes);
         }
 
-        $scope.$digest();
+        $scope.$evalAsync();
         return Promise.resolve(data);
       }, (e) => {
         console.log(e);
@@ -2118,7 +2172,7 @@ angular
         }, 20);
       } else {
         if (!$scope.$$phase) {
-          $scope.$digest();
+          $scope.$evalAsync();
         }
 
         $timeout(function() {
@@ -2168,7 +2222,7 @@ angular
         $('#editUserSettingModal').modal('hide');
       }, (e) => {
         $scope.editMessages = [e.toString().replace("  ", "").replace("\n", "")];
-        $scope.$digest();
+        $scope.$evalAsync();
       });
     }
 
@@ -2211,7 +2265,7 @@ angular
         user.authEvents = data.AuthEvents;
 
         if (!$scope.$$phase) {
-          $scope.$digest();
+          $scope.$evalAsync();
         }        
       });
     };
@@ -2334,7 +2388,7 @@ angular
         $scope.users = userSvc.users;
 
         if (!$scope.$$phase) {
-          $scope.$digest();
+          $scope.$evalAsync();
         }
 
         $('.arrow').hide();
@@ -2377,7 +2431,7 @@ angular
         });
 
         if (!$scope.$$phase) {
-          $scope.$digest();
+          $scope.$evalAsync();
         }
 
         $('.arrow').hide();
@@ -2406,7 +2460,7 @@ angular
         console.log($scope.users)
 
         if (!$scope.$$phase) {
-          $scope.$digest();
+          $scope.$evalAsync();
         }
       });
     }*/
@@ -2437,14 +2491,14 @@ angular
           $scope.retrieveS3Metadata(DICTIONARY_BUCKET.name, data.Contents[e].Key, DICTIONARY_BUCKET.region).then((metadata) => {
             console.log(metadata);
             $scope.files[data.Contents[e].Key].metadata = metadata;
-            $scope.$digest();
+            $scope.$evalAsync();
           });
         });
 
         $scope.pathTree = $scope.getPathTree(Object.keys($scope.files));
 
         $scope.files_loading = false;
-        $scope.$digest();
+        $scope.$evalAsync();
       });
     }
 
@@ -2506,7 +2560,7 @@ angular
         }
 
         $scope.large_file_uploading = false;
-        $scope.$digest()
+        $scope.$evalAsync();
 
         return success(true);
       });
@@ -2557,7 +2611,7 @@ angular
 
       $scope.upload_ready = false;
       $scope.uploading_hashes = true;
-      $scope.$digest();
+      $scope.$evalAsync();
 
       const btnToHide = (type == "wordlist") ? "#rulesupload" : "#wordlistupload";
       $(btnToHide).hide();
@@ -2567,7 +2621,7 @@ angular
       })
       .on('httpUploadProgress', function(evt) {
         $scope.uploadProgress = Math.floor(evt.loaded / file.size * 100);
-        $scope.$digest();
+        $scope.$evalAsync();
       })
       .send(function(err, result) {
         if (err) {
@@ -2615,7 +2669,7 @@ angular
         } else {
           delete $scope.files[key];
           $scope.populateFiles();
-          $scope.$digest();
+          $scope.$evalAsync();
         }
       });
     };
