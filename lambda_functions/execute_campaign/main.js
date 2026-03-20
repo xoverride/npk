@@ -428,21 +428,17 @@ exports.main = async function(event, context, callback) {
     	Values: [archs[manifest.instanceType]]
     });
 
-    const defaultImageName = "Deep Learning Base OSS Nvidia Driver GPU AMI (Amazon Linux 2023) *";
+    const defaultImageName = "Deep Learning Base AMI with Single CUDA (Amazon Linux 2023) ????????";
 
 	imageFilters.push({
     	Name: "name",
     	Values: [amis[manifest.instanceType] || defaultImageName]
     });
 
-    const defaultImageOwner = "898082745236";
-
-	imageFilters.push({
-    	Name: "owner-id",
-    	Values: [owners[manifest.instanceType] || defaultImageOwner]
-    });
+    const imageOwner = owners[manifest.instanceType] || "amazon";
 
     console.log(imageFilters);
+    console.log("Image owner:", imageOwner);
 
 	try {
 		[pricing, image] = await Promise.all([
@@ -454,6 +450,7 @@ exports.main = async function(event, context, callback) {
 			}).promise(),
 
 			ec2.describeImages({
+				Owners: [imageOwner],
 				Filters: imageFilters
 			}).promise()
 		]);

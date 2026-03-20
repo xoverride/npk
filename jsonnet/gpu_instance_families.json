@@ -23,7 +23,8 @@
 	},
 	"NVIDIA T4G": {
 		"architecture": "arm64",
-		"ami": "Deep Learning ARM64 Base OSS Nvidia Driver GPU AMI (Amazon Linux 2023) *",
+		"ami": "Deep Learning ARM64 Base AMI with Single CUDA (Amazon Linux 2023) ????????",
+		"owner": "amazon",
 		"quotaCode": "L-3819A6DF",
 		"instances": {
 			"g5g.xlarge": [1, 4],

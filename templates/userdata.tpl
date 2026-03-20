@@ -110,6 +110,12 @@ export BUCKETREGION=${userdataRegion}
 echo "Using dictionary bucket $BUCKET";
 
 log_perf "Driver and Package Installation" "START"
+# Clear stale CUDA repo metadata cache from the AMI.
+# The Deep Learning AMI ships with cached repodata whose hash-prefixed filenames
+# may no longer exist on NVIDIA's CDN. This causes 404s on any yum operation.
+dnf clean all --disablerepo='*' --enablerepo='cuda*' 2>/dev/null || true
+rm -rf /var/cache/dnf/cuda-rhel9-x86_64* 2>/dev/null || true
+
 # AMD drivers are only available on AL2
 if [[ `lspci | grep AMD | wc -l` -gt 0 ]]; then
 	aws s3 cp s3://$BUCKET/components-v3/epel.rpm .
@@ -121,7 +127,7 @@ else
 	systemctl start crond.service
 fi
 
-yum install -y jq curl tar xz
+yum install -y --allowerasing jq curl tar xz
 log_perf "Driver and Package Installation" "DONE"
 
 log_perf "7-Zip Binary Download" "START"
