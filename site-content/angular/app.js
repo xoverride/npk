@@ -71,20 +71,19 @@ angular
 		};
 	})
 	.filter('toArray', function() {
-		var lastInput = null;
-		var lastOutput = null;
+		var cache = new WeakMap();
 
 		var filterFunc = function(object) {
 			if (!object || typeof object !== 'object') {
 				return [];
 			}
 
-			// If the input object reference hasn't changed, return cached result
-			if (object === lastInput && lastOutput) {
-				return lastOutput;
+			// Return cached result if the same object reference was seen before
+			if (cache.has(object)) {
+				return cache.get(object);
 			}
 
-			// Build new array only if input changed
+			// Build new array only if input is new
 			const newObject = Object.keys(object).reduce((acc, cur) => {
 				// Create a shallow copy to avoid mutating the original object
 				const item = Object.assign({}, object[cur], {
@@ -97,9 +96,7 @@ angular
 				return acc;
 			}, []);
 
-			// Cache for next call
-			lastInput = object;
-			lastOutput = newObject;
+			cache.set(object, newObject);
 
 			return newObject;
 		};
