@@ -1919,31 +1919,110 @@ angular
           // Parse all previous fleets (supports multiple resume attempts)
           if (Array.isArray(campaigns?.[e]?.base?.previousFleets)) {
             campaigns[e].base.previousFleets.forEach(function(fleet) {
+              // Unmarshall DynamoDB-marshalled nested data if present.
+              // Data may arrive in several forms depending on which version of
+              // execute_campaign archived the fleet:
+              //   (a) Already a plain object/array (fully unmarshalled by npkDB.select)
+              //   (b) Single-marshalled: {M: {...}} / {L: [...]} (current execute_campaign
+              //       copies already-marshalled attrs into the fleet, so top-level
+              //       unmarshall leaves one layer of DynamoDB typing)
+              //   (c) Double-marshalled: marshall() was called on data that was already
+              //       marshalled (older execute_campaign.orig path)
+              //   (d) null/undefined/missing — fleet may lack history or status
+              try {
+                if (fleet.spotRequestStatus) {
+                  // Case (b): single-marshalled map — has .M key with object value
+                  if (fleet.spotRequestStatus.M && typeof fleet.spotRequestStatus.M === 'object' && !fleet.spotRequestStatus.M.M) {
+                    console.debug('[cmCtrl] Unmarshalling single-marshalled spotRequestStatus for fleet #' + fleet.attemptNumber);
+                    fleet.spotRequestStatus = AWS.DynamoDB.Converter.output(fleet.spotRequestStatus);
+                  }
+                  // Case (c): double-marshalled — .M itself contains another .M layer
+                  else if (fleet.spotRequestStatus.M && fleet.spotRequestStatus.M.M) {
+                    console.debug('[cmCtrl] Unmarshalling double-marshalled spotRequestStatus for fleet #' + fleet.attemptNumber);
+                    fleet.spotRequestStatus = AWS.DynamoDB.Converter.output(fleet.spotRequestStatus);
+                    // Unwrap each value if still marshalled
+                    Object.keys(fleet.spotRequestStatus).forEach(function(key) {
+                      if (fleet.spotRequestStatus[key] && fleet.spotRequestStatus[key].M) {
+                        fleet.spotRequestStatus[key] = AWS.DynamoDB.Converter.output(fleet.spotRequestStatus[key]);
+                      }
+                    });
+                  }
+                  // Case (a): already a plain object — no action needed
+                }
+              } catch (ex) {
+                console.error('[cmCtrl] Error unmarshalling spotRequestStatus for fleet #' + fleet.attemptNumber + ':', ex, fleet.spotRequestStatus);
+              }
+
+              try {
+                if (fleet.spotRequestHistory) {
+                  // Case (b): single-marshalled list — has .L key with array value
+                  if (Array.isArray(fleet.spotRequestHistory.L)) {
+                    console.debug('[cmCtrl] Unmarshalling single-marshalled spotRequestHistory for fleet #' + fleet.attemptNumber);
+                    fleet.spotRequestHistory = AWS.DynamoDB.Converter.output(fleet.spotRequestHistory);
+                  }
+                  // Case (a): already a plain array — no action needed
+                  // Case (d): null/undefined handled by outer if
+                }
+              } catch (ex) {
+                console.error('[cmCtrl] Error unmarshalling spotRequestHistory for fleet #' + fleet.attemptNumber + ':', ex, fleet.spotRequestHistory);
+                fleet.spotRequestHistory = []; // Fallback to empty so template doesn't break
+              }
+
               // Parse each fleet's spot request history
               if (Array.isArray(fleet?.spotRequestHistory)) {
                 fleet.spotRequestHistory.forEach(function(h) {
-                  if (h.EventInformation.EventSubType == "launched" || h.EventInformation.EventSubType == "terminated") {
-                    h.EventInformation.EventDescription = JSON.parse(h.EventInformation.EventDescription);
+                  if (h.EventInformation && (h.EventInformation.EventSubType == "launched" || h.EventInformation.EventSubType == "terminated")) {
+                    // Only parse if it's a string (not already parsed from a previous load)
+                    if (typeof h.EventInformation.EventDescription === 'string') {
+                      try {
+                        h.EventInformation.EventDescription = JSON.parse(h.EventInformation.EventDescription);
+                      } catch (ex) {
+                        console.debug('[cmCtrl] Could not parse EventDescription for fleet #' + fleet.attemptNumber + ':', ex.message);
+                      }
+                    }
                   }
                 })
               }
             })
-          } else if (Array.isArray(campaigns?.[e]?.base?.previousSpotRequestHistory)) {
-            // Backward compatibility: convert old single-fleet format to new array format
+          } else if (campaigns?.[e]?.base?.previousSpotRequestHistory || campaigns?.[e]?.base?.previousSpotFleetId) {
+            // Backward compatibility: convert old single-fleet format to new array format.
+            // This handles campaigns that were resumed before the multi-fleet previousFleets
+            // array was introduced, where data was stored as flat previousSpotRequest* fields.
+            var prevHistory = campaigns[e].base.previousSpotRequestHistory;
+            var prevStatus = campaigns[e].base.previousSpotRequestStatus;
+
+            // Unmarshall if still in DynamoDB typed format
+            if (prevHistory && !Array.isArray(prevHistory) && prevHistory.L) {
+              console.debug('[cmCtrl] Unmarshalling legacy previousSpotRequestHistory');
+              prevHistory = AWS.DynamoDB.Converter.output(prevHistory);
+            }
+            if (prevStatus && !Array.isArray(prevStatus) && prevStatus.M) {
+              console.debug('[cmCtrl] Unmarshalling legacy previousSpotRequestStatus');
+              prevStatus = AWS.DynamoDB.Converter.output(prevStatus);
+            }
+
             campaigns[e].base.previousFleets = [{
               spotFleetRequestId: campaigns[e].base.previousSpotFleetId,
-              spotRequestHistory: campaigns[e].base.previousSpotRequestHistory,
-              spotRequestStatus: campaigns[e].base.previousSpotRequestStatus,
+              spotRequestHistory: prevHistory || [],
+              spotRequestStatus: prevStatus || {},
               attemptNumber: 1,
               terminatedAt: Math.floor(Date.now() / 1000)
             }];
 
-            // Parse the converted history
-            campaigns[e].base.previousFleets[0].spotRequestHistory.forEach(function(h) {
-              if (h.EventInformation.EventSubType == "launched" || h.EventInformation.EventSubType == "terminated") {
-                h.EventInformation.EventDescription = JSON.parse(h.EventInformation.EventDescription);
-              }
-            })
+            // Parse the converted history (safely — may be empty or malformed)
+            if (Array.isArray(campaigns[e].base.previousFleets[0].spotRequestHistory)) {
+              campaigns[e].base.previousFleets[0].spotRequestHistory.forEach(function(h) {
+                if (h.EventInformation && (h.EventInformation.EventSubType == "launched" || h.EventInformation.EventSubType == "terminated")) {
+                  try {
+                    if (typeof h.EventInformation.EventDescription === 'string') {
+                      h.EventInformation.EventDescription = JSON.parse(h.EventInformation.EventDescription);
+                    }
+                  } catch (ex) {
+                    console.debug('[cmCtrl] Could not parse legacy EventDescription:', ex.message);
+                  }
+                }
+              })
+            }
           }
         });
       });
