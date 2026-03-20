@@ -96,8 +96,12 @@ mkdir /potfiles
 ln -s /var/log/cloud-init-output.log /potfiles/$${INSTANCEID}-output.log
 
 log_perf "Crontab Setup" "START"
-echo "* * * * * root aws --region $USERDATAREGION s3 sync s3://$USERDATA/$ManifestPath/potfiles/ /potfiles/ --exclude \"*.log\" --exclude \"*benchmark-results*\"" >> /etc/crontab
-echo "* * * * * root aws --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --exclude \"*\" --include \"*$${INSTANCEID}*\" --include \"*benchmark-results*\"" >> /etc/crontab
+AWS_BIN=$(which aws 2>/dev/null || echo "/usr/local/bin/aws")
+if [ ! -x "$AWS_BIN" ]; then
+	echo "[!] WARNING: aws CLI not found at $AWS_BIN - cron sync will fail"
+fi
+echo "* * * * * root $AWS_BIN --region $USERDATAREGION s3 sync s3://$USERDATA/$ManifestPath/potfiles/ /potfiles/ --exclude \"*.log\" --exclude \"*benchmark-results*\"" >> /etc/crontab
+echo "* * * * * root $AWS_BIN --region $USERDATAREGION s3 sync /potfiles/ s3://$USERDATA/$ManifestPath/potfiles/ --exclude \"*\" --include \"*$${INSTANCEID}*\" --include \"*benchmark-results*\"" >> /etc/crontab
 log_perf "Crontab Setup" "DONE"
 
 # This is required for the wrapper to get anything done.
