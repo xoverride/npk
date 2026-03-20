@@ -100,7 +100,7 @@
                           </small>
                         </td>
                         <td><small>{{ campaign.durationSeconds / 3600 }} Hours</small></td>
-                        <td><small>${{ (((campaign.accumulatedPrice || 0) * 1 + (campaign.hasOwnProperty('currentFleetPrice') ? (campaign.currentFleetPrice || 0) : (campaign.price || 0)) * 1) | number:2) }}</small></td>
+                        <td><small>${{ getCampaignPrice(campaign) | number:2 }}</small></td>
                         <td>
                           <small ng-if="!!!campaign.interrupted">
                             {{ campaign.status }}
@@ -110,8 +110,8 @@
                           </div>
                         </td>
                         <td>
-                          <img id="action-{{ campaign._id.split(':')[2] }}" src="assets/images/loading.gif" style="height: 10px; width: 25px; display: none;">
-                          <a id="cancel-{{ campaign._id.split(':')[2] }}" class="badge badge-warning waves-effect waves-light" ng-click="$parent.npkDB.cancelCampaign(campaign._id.split(':')[2])">
+                          <img id="action-{{ campaign.campaignId }}" src="assets/images/loading.gif" style="height: 10px; width: 25px; display: none;">
+                          <a id="cancel-{{ campaign.campaignId }}" class="badge badge-warning waves-effect waves-light" ng-click="$parent.npkDB.cancelCampaign(campaign.campaignId)">
                           <i class="fa fa-trash-o"></i>
                           <span>
                             Cancel
@@ -123,7 +123,7 @@
                        <tr>
                         <td colspan="8" class="card-body">
                           <div ng-show="objLength(campaign.nodes) < 1">
-                            <div ng-if="campaign.spotRequestHistory.slice(-1)[0].EventType != 'error'">
+                            <div ng-if="campaign.lastSpotEvent.EventType != 'error'">
                               <h6 class="card-text text-white">
                                 No status reports received. Nodes may still be starting.<br />
                                 <div ng-if="objLength(campaigns[campaign._id].spotRequestStatus) < 1" class="text-center">
@@ -131,12 +131,12 @@
                                 </div>
                               </h6>
                             </div>
-                            <div ng-if="campaign.spotRequestHistory.slice(-1)[0].EventType == 'error'">
+                            <div ng-if="campaign.lastSpotEvent.EventType == 'error'">
                               <h6 class="card-text text-white">
                                 AWS raised an error while fulfilling your spot fleet request.<br />
                               </h6>
                               <small class="ml-3 text-white">
-                                [{{ campaign.spotRequestHistory.slice(-1)[0].EventInformation.EventSubType }}]: {{ campaign.spotRequestHistory.slice(-1)[0].EventInformation.EventDescription }}
+                                [{{ campaign.lastSpotEvent.EventInformation.EventSubType }}]: {{ campaign.lastSpotEvent.EventInformation.EventDescription }}
                                 <p class="mt-1">
                                   <b>NPK Note</b>: Spot capacity issues are increasingly common in AWS due to the global chip shortage.
                                   <br />Try using a different GPU instance family or running your campaign in a different region.
@@ -144,7 +144,7 @@
                               </small>
                             </div>
                             <div ng-repeat="(nid, node) in campaigns[campaign._id].spotRequestStatus">
-                              <a class="badge badge-primary" ng-href="#/file-management/campaigns/{{ campaign._id.split(':')[2] }}/potfiles/{{ nid }}-output"><small>{{ nid }}</small></a>
+                              <a class="badge badge-primary" ng-href="#/file-management/campaigns/{{ campaign.campaignId }}/potfiles/{{ nid }}-output"><small>{{ nid }}</small></a>
                               <small class="ml-3 text-white">
                                 {{ campaigns[campaign._id].spotRequestStatus[nid].State }} / {{ campaigns[campaign._id].spotRequestStatus[nid].Status.Code }};&nbsp;&nbsp;&nbsp;[ {{ campaigns[campaign._id].spotRequestStatus[nid].Status.Message }} ]
                               </small>
@@ -152,10 +152,10 @@
                           </div>
                           <h6 class="text-white" ng-if="objLength(campaign.nodes) > 0">
                             Nodes for
-                            <a ng-href="#/campaign-management/{{ campaign._id.split(':')[2] }}">
-                              {{ campaign._id.split(':')[2] }}
+                            <a ng-href="#/campaign-management/{{ campaign.campaignId }}">
+                              {{ campaign.campaignId }}
                             </a>
-                            
+
                             </small>
                           </h6>
                           <div class="row" ng-if="objLength(campaign.nodes) > 0" style="margin: 0px;">
@@ -164,7 +164,7 @@
                                 <div class="row">
                                   <div class="col-lg-2" style="margin-top: 1px;">
                                     <p class="text-center" style="line-height: 1">
-                                      <a class="badge badge-primary" ng-href="#/file-management/campaigns/{{ campaign._id.split(':')[2] }}/potfiles/{{ nid }}-output"><small>{{ nid }}</small></a><br>
+                                      <a class="badge badge-primary" ng-href="#/file-management/campaigns/{{ campaign.campaignId }}/potfiles/{{ nid }}-output"><small>{{ nid }}</small></a><br>
                                     </p>
                                   </div>
                                   <div class="col-lg-10 text-center pt-2">
@@ -172,7 +172,7 @@
                                       <div class="progress-bar bg-warning progress-bar-striped" ng-class="{'progress-bar-animated': campaign.active}" role="progressbar" style="width: {{ ((node.first - campaign.startTime) / campaign.durationSeconds) * 100 }}%"></div>
                                       <div class="progress-bar bg-primary progress-bar-striped" ng-class="{'progress-bar-animated': campaign.active}" role="progressbar" style="width: {{ ((node.firstRecovery - node.first) / campaign.durationSeconds) * 100 }}%"></div>
                                       <div class="progress-bar bg-success progress-bar-striped" ng-class="{'progress-bar-animated': campaign.active}" role="progressbar" style="width: {{ ((node.last - node.firstRecovery) / campaign.durationSeconds) * 100 }}%"></div>
-                                      <div class="progress-bar bg-dark progress-bar-striped" ng-if="node.last.status == 'COMPLETED' || (now() - node.last) > 120" ng-class="{'progress-bar-animated': campaign.active}" role="progressbar" style="width: {{ ((now() - node.last) / campaign.durationSeconds) * 100 }}%"></div>
+                                      <div class="progress-bar bg-dark progress-bar-striped" ng-if="node.last.status == 'COMPLETED' || (now - node.last) > 120" ng-class="{'progress-bar-animated': campaign.active}" role="progressbar" style="width: {{ ((now - node.last) / campaign.durationSeconds) * 100 }}%"></div>
                                    </div>
                                  </div>
                                </div>
@@ -185,7 +185,7 @@
                                     <br/>
                                     Hashcat: {{ node['latest'].progress | number:2 }}% |
                                     Time: {{ ((node.last - node.first) / campaign.durationSeconds) * 100 | number:2 }}% |
-                                    Price: {{ (((campaign.accumulatedPrice || 0) * 1 + (campaign.hasOwnProperty('currentFleetPrice') ? (campaign.currentFleetPrice || 0) : (campaign.price || 0)) * 1) / campaign.targetPrice) * 100 | number:2 }}%;
+                                    Price: {{ (getCampaignPrice(campaign) / campaign.targetPrice) * 100 | number:2 }}%;
                                     {{ node['latest'].status }} [{{ node['latest'].recoveredHashes }} / {{ campaign.hashes }}]
                                   </small>
                                   </div>
@@ -199,7 +199,7 @@
                              <div ng-repeat="(nid, node) in campaigns[campaign._id].spotRequestStatus" ng-hide="campaign.nodes.hasOwnProperty(nid)">
                               <div class="row">
                                 <div class="col-lg-2" style="margin-top: 1px;">
-                                  <a class="badge badge-primary" ng-href="#/file-management/campaigns/{{ campaign._id.split(':')[2] }}/potfiles/{{ nid }}-output"><small>{{ nid }}</small></a>
+                                  <a class="badge badge-primary" ng-href="#/file-management/campaigns/{{ campaign.campaignId }}/potfiles/{{ nid }}-output"><small>{{ nid }}</small></a>
                                 </div>
                                 <div class="col-lg-10 text-center" style="padding-top: 8px;">
                                   <small class="ml-3 text-white">
@@ -218,7 +218,7 @@
                                 <div ng-repeat="(nid, node) in fleet.spotRequestStatus">
                                   <div class="row">
                                     <div class="col-lg-2" style="margin-top: 1px;">
-                                      <a class="badge badge-warning" ng-href="#/file-management/campaigns/{{ campaign._id.split(':')[2] }}/potfiles/{{ nid }}-output"><small>{{ nid }}</small></a>
+                                      <a class="badge badge-warning" ng-href="#/file-management/campaigns/{{ campaign.campaignId }}/potfiles/{{ nid }}-output"><small>{{ nid }}</small></a>
                                     </div>
                                     <div class="col-lg-10 text-center" style="padding-top: 8px;">
                                       <small class="ml-3 text-warning">
@@ -283,7 +283,7 @@
                         </small>
                       </td>
                       <td><small>{{ campaign.durationSeconds / 3600 }} Hours</small></td>
-                      <td><small>${{ (((campaign.accumulatedPrice || 0) * 1 + (campaign.hasOwnProperty('currentFleetPrice') ? (campaign.currentFleetPrice || 0) : (campaign.price || 0)) * 1) | number:2) }}</small></td>
+                      <td><small>${{ getCampaignPrice(campaign) | number:2 }}</small></td>
                       <td>
                         <small ng-if="!!!campaign.interrupted">
                           {{ campaign.status }}
@@ -293,15 +293,15 @@
                         </div>
                       </td>
                       <td>
-                        <img id="action-{{ campaign._id.split(':')[2] }}" src="assets/images/loading.gif" style="height: 10px; width: 25px; display: none;">
-                        <a id="delete-{{ campaign._id.split(':')[2] }}"class="badge badge-danger waves-effect waves-light" ng-hide="campaign.status == 'AVAILABLE'" ng-click="$parent.npkDB.cancelCampaign(campaign._id.split(':')[2])">
+                        <img id="action-{{ campaign.campaignId }}" src="assets/images/loading.gif" style="height: 10px; width: 25px; display: none;">
+                        <a id="delete-{{ campaign.campaignId }}"class="badge badge-danger waves-effect waves-light" ng-hide="campaign.status == 'AVAILABLE'" ng-click="$parent.npkDB.cancelCampaign(campaign.campaignId)">
                           <i class="fa fa-trash-o"></i>
                           <span>
                             Delete
                           </span>
                         </a>
 
-                        <a id="start-{{ campaign._id.split(':')[2] }}" class="badge badge-success waves-effect waves-light" ng-show="campaign.status == 'AVAILABLE'" ng-click="executeCampaign(campaign._id.split(':')[2])">
+                        <a id="start-{{ campaign.campaignId }}" class="badge badge-success waves-effect waves-light" ng-show="campaign.status == 'AVAILABLE'" ng-click="executeCampaign(campaign.campaignId)">
                           <i class="fa fa-sign-in"></i>
                           <span>
                             Start

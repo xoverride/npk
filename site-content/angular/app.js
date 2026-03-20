@@ -71,16 +71,42 @@ angular
 		};
 	})
 	.filter('toArray', function() {
-		return function(object) {
+		var lastInput = null;
+		var lastOutput = null;
+
+		var filterFunc = function(object) {
+			if (!object || typeof object !== 'object') {
+				return [];
+			}
+
+			// If the input object reference hasn't changed, return cached result
+			if (object === lastInput && lastOutput) {
+				return lastOutput;
+			}
+
+			// Build new array only if input changed
 			const newObject = Object.keys(object).reduce((acc, cur) => {
-				object[cur]._id = cur;
-				acc.push(object[cur]);
+				// Create a shallow copy to avoid mutating the original object
+				const item = Object.assign({}, object[cur], {
+					_id: cur,
+					// Pre-compute campaign ID to avoid .split() in templates
+					campaignId: cur.includes(':') ? cur.split(':')[2] : cur
+				});
+				acc.push(item);
 
 				return acc;
 			}, []);
 
+			// Cache for next call
+			lastInput = object;
+			lastOutput = newObject;
+
 			return newObject;
-		}
+		};
+
+		// Mark as stateful - this filter maintains its own cache
+		filterFunc.$stateful = true;
+		return filterFunc;
 	})
 	.filter('toHs', function() {
 		return function(number) {
@@ -133,36 +159,62 @@ angular
 		return filter;
 	})
 	.filter('momentns', function () {
-	    return function (input, momentFn /*, param1, param2, ...param n */) {
-	  		var args = Array.prototype.slice.call(arguments, 2),
-	        momentObj = moment(Date.now() + (input * 1000));
+	    var filterFunc = function (input, momentFn /*, param1, param2, ...param n */) {
+	        // Handle null, undefined, or invalid input
+	        if (input == null || input === undefined || isNaN(input)) {
+	        	return 'N/A';
+	        }
 
 	        if (input == 0 && momentFn == 'fromNow') {
 	        	return 'Instantly';
 	        }
 
-	        if (input == null) {
-	        	return 'Maybe';
+	  		var args = Array.prototype.slice.call(arguments, 2);
+	        var momentObj = moment(Date.now() + (input * 1000));
+
+	        // Validate moment object and function exist
+	        if (!momentObj.isValid() || typeof momentObj[momentFn] !== 'function') {
+	        	return 'Invalid';
 	        }
 
 	    	return momentObj[momentFn].apply(momentObj, args);
 	  	};
+	  	// Mark as stateful to prevent digest loop from recalculating on every cycle
+	  	filterFunc.$stateful = true;
+	  	return filterFunc;
 	})
 	.filter('momentfn', function () {
-	    return function (input, momentFn /*, param1, param2, ...param n */) {
-	  		var args = Array.prototype.slice.call(arguments, 2),
-	        momentObj = moment((input * 1000));
+	    var cache = {};
+	    var filterFunc = function (input, momentFn /*, param1, param2, ...param n */) {
+	        // Handle null, undefined, or invalid input
+	        if (input == null || input === undefined || isNaN(input)) {
+	        	return 'N/A';
+	        }
 
 	        if (input == 0 && momentFn == 'fromNow') {
 	        	return 'Instantly';
 	        }
 
-	        if (input == null) {
-	        	return 'Maybe';
+	        // Cache key to prevent recalculation
+	        var cacheKey = input + ':' + momentFn + ':' + Array.prototype.slice.call(arguments, 2).join(':');
+	        if (cache[cacheKey]) {
+	        	return cache[cacheKey];
 	        }
 
-	    	return momentObj[momentFn].apply(momentObj, args);
+	  		var args = Array.prototype.slice.call(arguments, 2);
+	        var momentObj = moment((input * 1000));
+
+	        // Validate moment object and function exist
+	        if (!momentObj.isValid() || typeof momentObj[momentFn] !== 'function') {
+	        	return 'Invalid';
+	        }
+
+	        var result = momentObj[momentFn].apply(momentObj, args);
+	        cache[cacheKey] = result;
+	    	return result;
 	  	};
+	  	// Remove stateful flag and use caching instead
+	  	return filterFunc;
 	})
 	.directive('ngEnter', function() {
 		return function(scope, element, attrs) {

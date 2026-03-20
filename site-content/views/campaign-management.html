@@ -50,7 +50,7 @@
                       <br>
                       Hashcat: {{ node['latest'].progress | number:2 }}% |
                       Time: {{ ((node.last - node.first) / data.base.durationSeconds) * 100 | number:2 }}% |
-                      Price: {{ (data.base.totalPrice / data.base.targetPrice) * 100 | number:2 }}%
+                      Price: {{ data.base.pricePercentage | number:2 }}%
                     </small>
                     </div>
                   </div>
@@ -151,7 +151,7 @@
                   <h5 class="text-white"><small>Region:</small> {{ manifest.region }}</h5><br/><br/>
                   <h4 class="text-white"><small>Actual Price:</small> ${{ data.base.totalPrice | number:2 }}</h4>
                   <small ng-if="data.base.accumulatedPrice > 0" class="text-warning">
-                    (Accumulated: ${{ data.base.accumulatedPrice | number:2 }} + Current: ${{ (data.base.hasOwnProperty('currentFleetPrice') ? (data.base.currentFleetPrice || 0) : (data.base.price || 0)) | number:2 }})
+                    (Accumulated: ${{ data.base.accumulatedPrice | number:2 }} + Current: ${{ data.base.calculatedPrice - data.base.accumulatedPrice | number:2 }})
                   </small>
                 </div>
               </div>
@@ -210,7 +210,7 @@
                     </div>
                     Provisioning:
                      <small>
-                      {{ first | momentfn:'from':(data.base.startTime * 1000):true }}
+                      {{ ::first | momentfn:'from':(data.base.startTime * 1000):true }}
                     </small>
                   </div>
 
@@ -220,7 +220,7 @@
                     </div>
                     First Crack:
                      <small>
-                      {{ firstRecovery | momentfn:'from':(data.base.startTime * 1000):true }}
+                      {{ ::firstRecovery | momentfn:'from':(data.base.startTime * 1000):true }}
                     </small>
                   </div>
 
@@ -230,7 +230,7 @@
                     </div>
                     Finished
                      <small>
-                      {{ last | momentfn:'from':(data.base.startTime * 1000) }}
+                      {{ ::last | momentfn:'from':(data.base.startTime * 1000) }}
                     </small>
                   </div>
                   <div ng-if="data.base.resumeCount > 0" class="mt-2">
@@ -239,7 +239,7 @@
                     </div>
                     Total Runtime:
                      <small>
-                      {{ (now() - data.base.effectiveStartTime) | momentfn:'duration':true }}
+                      {{ (now - data.base.effectiveStartTime) | momentfn:'duration':true }}
                     </small>
                   </div>
                   <div style="border-bottom: 1px solid white;">&nbsp;</div>
@@ -271,7 +271,7 @@
                     </div>
                     <div class="col-md-3">
                       <h5 class="text-warning"><small>Campaign Runtime:</small></h5>
-                      <h4 class="text-white">{{ (now() - data.base.effectiveStartTime) | momentfn:'duration':true }}</h4>
+                      <h4 class="text-white">{{ (now - data.base.effectiveStartTime) | momentfn:'duration':true }}</h4>
                       <small class="text-muted">across all attempts</small>
                     </div>
                   </div>
@@ -318,15 +318,15 @@
                       <tbody>
                         <tr ng-repeat="event in data.base.spotRequestHistory" on-finish-render>
                           <td>
-                            <small>{{ event.Timestamp | momentfn:'from':(data.base.startTime * 1000):true }}</small>
+                            <small>{{ ::event.Timestamp | momentfn:'from':(data.base.startTime * 1000):true }}</small>
                           </td>
                           <td>
-                            <small>{{ event.EventType }}&nbsp;->{{ (event.EventInformation.InstanceId) ? " " + event.EventInformation.InstanceId : "" }} {{ event.EventInformation.EventSubType }}</small>
+                            <small>{{ ::event.EventType }}&nbsp;->{{ (event.EventInformation.InstanceId) ? " " + event.EventInformation.InstanceId : "" }} {{ ::event.EventInformation.EventSubType }}</small>
                           </td>
                           <td>
                             <small ng-if="!event.EventInformation.EventDescription.instanceType">{{ (event.EventInformation.EventDescription) ? event.EventInformation.EventDescription : "&lt; None &gt;" }}</small>
                             <small ng-if="event.EventInformation.EventDescription.instanceType">
-                              {{ event.EventInformation.EventDescription.instanceType }} running {{ event.EventInformation.EventDescription.image }} in {{ event.EventInformation.EventDescription.availabilityZone }}
+                              {{ ::event.EventInformation.EventDescription.instanceType }} running {{ ::event.EventInformation.EventDescription.image }} in {{ ::event.EventInformation.EventDescription.availabilityZone }}
                             </small>
                           </td>
                         </tr>
@@ -336,7 +336,7 @@
 
                   <!-- Previous Spot Fleet History (from earlier resume attempts) -->
                   <div ng-if="data.base.previousFleets && data.base.previousFleets.length > 0">
-                    <div ng-repeat="fleet in data.base.previousFleets.reverse()" class="mt-4">
+                    <div ng-repeat="fleet in data.base.previousFleets | orderBy:'attemptNumber':true" class="mt-4">
                       <h6 class="text-white">
                         <span class="badge badge-warning">Previous Fleet #{{ fleet.attemptNumber }}</span>
                         {{ fleet.spotFleetRequestId }}
@@ -353,15 +353,15 @@
                         <tbody>
                           <tr ng-repeat="event in fleet.spotRequestHistory" on-finish-render>
                             <td>
-                              <small>{{ event.Timestamp | momentfn:'from':(data.base.startTime * 1000):true }}</small>
+                              <small>{{ ::event.Timestamp | momentfn:'from':(data.base.startTime * 1000):true }}</small>
                             </td>
                             <td>
-                              <small>{{ event.EventType }}&nbsp;->{{ (event.EventInformation.InstanceId) ? " " + event.EventInformation.InstanceId : "" }} {{ event.EventInformation.EventSubType }}</small>
+                              <small>{{ ::event.EventType }}&nbsp;->{{ (event.EventInformation.InstanceId) ? " " + event.EventInformation.InstanceId : "" }} {{ ::event.EventInformation.EventSubType }}</small>
                             </td>
                             <td>
                               <small ng-if="!event.EventInformation.EventDescription.instanceType">{{ (event.EventInformation.EventDescription) ? event.EventInformation.EventDescription : "&lt; None &gt;" }}</small>
                               <small ng-if="event.EventInformation.EventDescription.instanceType">
-                                {{ event.EventInformation.EventDescription.instanceType }} running {{ event.EventInformation.EventDescription.image }} in {{ event.EventInformation.EventDescription.availabilityZone }}
+                                {{ ::event.EventInformation.EventDescription.instanceType }} running {{ ::event.EventInformation.EventDescription.image }} in {{ ::event.EventInformation.EventDescription.availabilityZone }}
                               </small>
                             </td>
                           </tr>
@@ -416,7 +416,7 @@
                         <small>x{{ campaign.instanceCount }}</small>
                       </td>
                       <td><small>{{ campaign.durationSeconds / 3600 }} Hours</small></td>
-                      <td><small>${{ (((campaign.accumulatedPrice || 0) * 1 + (campaign.hasOwnProperty('currentFleetPrice') ? (campaign.currentFleetPrice || 0) : (campaign.price || 0)) * 1) | number:2) }}</small></td>
+                      <td><small>${{ getCampaignPrice(campaign) | number:2 }}</small></td>
                       <td>
                           <small ng-if="!!!campaign.interrupted">
                             {{ campaign.status }}
