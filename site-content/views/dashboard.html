@@ -106,7 +106,9 @@
                             {{ campaign.status }}
                           </small>
                           <div ng-if="!!campaign.interrupted" class="badge bg-warning">
-                            {{ campaign.interrupted == 'Spot Interruption' ? 'Interrupted: Outbid' : 'Interrupted' }}
+                            {{ campaign.interrupted == 'Spot Interruption' ? 'Interrupted: Outbid' :
+                               campaign.interrupted == 'Capacity Loss' ? 'Interrupted: No Capacity' :
+                               'Interrupted' }}
                           </div>
                         </td>
                         <td>
@@ -289,7 +291,9 @@
                           {{ campaign.status }}
                         </small>
                         <div ng-if="!!campaign.interrupted" class="badge bg-warning">
-                          {{ campaign.interrupted == 'Spot Interruption' ? 'Interrupted: Outbid' : 'Interrupted' }}
+                          {{ campaign.interrupted == 'Spot Interruption' ? 'Interrupted: Outbid' :
+                               campaign.interrupted == 'Capacity Loss' ? 'Interrupted: No Capacity' :
+                               'Interrupted' }}
                         </div>
                       </td>
                       <td>
