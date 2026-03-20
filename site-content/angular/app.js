@@ -176,8 +176,6 @@ angular
 
 	    	return momentObj[momentFn].apply(momentObj, args);
 	  	};
-	  	// Mark as stateful to prevent digest loop from recalculating on every cycle
-	  	filterFunc.$stateful = true;
 	  	return filterFunc;
 	})
 	.filter('momentfn', function () {
