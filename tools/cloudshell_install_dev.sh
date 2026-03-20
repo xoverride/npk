@@ -82,7 +82,7 @@ fi
 
 # Run the deploy:
 cd /aws/mde/npk
-git checkout checkpoint-resume
+git checkout checkpoint-resume || git checkout -b checkpoint-resume origin/checkpoint-resume
 git pull
 
 echo

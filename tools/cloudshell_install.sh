@@ -75,11 +75,12 @@ fi
 # Pull the repo:
 if [[ ! -f /aws/mde/npk/README.md ]]; then
 	echo "[*] Cloning the NPK repo"
-	git clone https://github.com/c6fc/npk.git /aws/mde/npk > /dev/null
+	git clone https://github.com/xoverride/npk.git /aws/mde/npk > /dev/null
 fi
 
 # Run the deploy:
 cd /aws/mde/npk
+git checkout checkpoint-resume
 git pull
 
 echo
