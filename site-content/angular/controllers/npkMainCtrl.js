@@ -821,8 +821,16 @@ angular
 
       $scope.rulesFiles = data;
       $scope.rules_loading = false;
-      $scope.$evalAsync();
-      $('#rules_select').multiSelect('refresh');
+      $scope.$evalAsync(function() {
+        // Refresh the multiSelect plugin only if it's currently active
+        // (i.e., wordlist attacks are enabled). Otherwise, toggleWordlist()
+        // will initialize it fresh when the user enables wordlist attacks.
+        if ($scope.use_wordlist) {
+          $timeout(function() {
+            $('#rules_select').multiSelect('refresh');
+          });
+        }
+      });
     });
 
     $scope.$parent.npkDB.listBucketContents(DICTIONARY_BUCKET.name, "wordlist/", DICTIONARY_BUCKET.region).then((data) => {
@@ -887,7 +895,10 @@ angular
         $scope.wordlistKeyspace = 1;
         $('#wordlistConfig').css('opacity', 1);
         $('#wordlist_select').prop('disabled', false);
-        $('#rules_select').multiSelect();
+        // Defer multiSelect init to next digest so Angular renders <option> elements first
+        $timeout(function() {
+          $('#rules_select').multiSelect();
+        });
       } else {
         $scope.selectedRules = [];
         $scope.selectedWordlist = [];
